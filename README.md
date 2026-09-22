@@ -296,25 +296,18 @@ func Reserve(ctx context.Context, db *gorm.DB, productID, quantity int64) error 
 
 - `NewStore(db)` 和 `NewUnitOfWork(db)` 支持不使用 IoC 的直接构造。
 - `Store.WithContext(ctx)` 优先使用 ctx 中的事务，没有事务则使用基础连接。
-- `Store.ForUpdate(ctx)` 要求事务上下文，并添加 `FOR UPDATE` 子句；无事务时返回的 `*gorm.DB.Error` 为 `ErrTransactionScope`。
+- `Store.ForUpdate(ctx)` 在有事务上下文时添加 `FOR UPDATE` 子句；无事务时返回普通查询，不添加锁子句，也不因缺少事务而报错。
 - `UnitOfWork.Execute(ctx, action)` 在无事务时启动 GORM 事务：回调返回 nil 则提交，返回错误则回滚；panic 交由 GORM 回滚后继续传播。
-- 同一连接池中的嵌套 `Execute` 复用已有事务，不创建新事务或 savepoint。内层返回错误必须继续向外返回，否则外层仍可能提交。
+- 嵌套 `Execute` 直接复用 ctx 中的已有事务，不创建新事务或 savepoint，只有最外层负责提交或回滚。内层返回错误必须继续向外返回，否则外层仍可能提交。
 - 回调中的所有仓储操作必须传递 **`txCtx`**。传入原始 ctx 会脱离事务，绕过 Store 使用基础 db 也不会自动加入事务。
-- ctx 内绑定的事务不能跨不同的底层 `*sql.DB` 使用，也不能在回调结束后继续使用。
+- 不进行跨库校验：即使 Store 或 UnitOfWork 配置了其他数据库，传入事务 ctx 后仍使用 ctx 中的事务连接，不会切换数据库。事务 ctx 不能在回调结束后继续使用。
 
-### 底层事务 API
+### 事务职责
 
-`TxOrDB(ctx, base, mode)` 返回携带当前 context 的新 GORM session：
-
-| mode | 无事务 | 有同库事务 |
-| --- | --- | --- |
-| `TxOptional` | 基础连接 | 已有事务 |
-| `TxRequired` | `ErrTransactionScope` | 已有事务 |
-| `TxForbidden` | 基础连接 | `ErrTransactionScope` |
-
-跨库事务绑定或非法 mode 同样通过返回值的 `.Error` 报错。调用方必须检查 `.Error`，可以用 `errors.Is(err, infra.ErrTransactionScope)` 判断范围错误。
-
-`WithTx(ctx, base, tx)` 只负责把事务绑定到 context，不启动、提交或回滚事务。已有绑定或 tx 为 nil 时拒绝绑定；调用方必须保证 base 有效且 tx 确实来自 base，函数不会验证 tx 的真实来源。常规业务优先使用 `UnitOfWork.Execute`。
+- Store 只根据 ctx 选择事务连接或基础连接，不开启、提交或回滚事务。返回的新 GORM session 携带当前 ctx，不继承已有查询条件。
+- UnitOfWork 通过 GORM `Transaction` 管理事务生命周期，将事务直接绑定到私有 context key，并把 `txCtx` 传给回调。
+- `ForUpdate` 在缺少事务上下文时退化为普通查询，不提供行锁保护。库存扣减等先查再改操作必须放在 `UnitOfWork.Execute` 中并传递 `txCtx`，避免遗漏事务上下文后静默失去锁保护。
+- 原有 `TxMode`、`TxOrDB` 和 `WithTx` API 已移除；事务入口统一使用 `UnitOfWork.Execute`，连接访问使用 Store。
 
 ## 日志 logx
 
@@ -394,7 +387,7 @@ func Register(sc *ioc.ServiceCollection, dsn string, cfg *logx.Config) *ioc.Serv
 | Gin、HTTP、统一响应、参数错误 | [ginx/response.go](ginx/response.go)、[ginx/middleware_error.go](ginx/middleware_error.go) | `httpx.Ok`、`Fail`、`FailParam`、`AutoErrorInterceptor` |
 | RPC、Validate、trailer、错误还原 | [grpcx/interceptors.go](grpcx/interceptors.go)、[grpcx/translator.go](grpcx/translator.go) | `UnaryServerValidationInterceptor`、`HandleServerError`、`HandleClientError` |
 | GORM、MySQL、PostgreSQL、连接注册 | [infra/database.go](infra/database.go) | `AddDatabase` |
-| 事务、行锁、仓储、工作单元 | [infra/uow.go](infra/uow.go)、[infra/store.go](infra/store.go) | `Execute`、`WithContext`、`ForUpdate`、`TxOrDB` |
+| 事务、行锁、仓储、工作单元 | [infra/uow.go](infra/uow.go)、[infra/store.go](infra/store.go) | `Execute`、`WithContext`、`ForUpdate` |
 | 持久化模型、时间戳、软删除 | [infra/model.go](infra/model.go) | `BaseModel` |
 | 日志、轮转、控制台、文件 | [logx/config.go](logx/config.go)、[logx/writer.go](logx/writer.go)、[logx/log.go](logx/log.go) | `Config`、`NewInstance` |
 | IoC、单例注册 | [logx/ioc.go](logx/ioc.go)、[infra/database.go](infra/database.go)、[infra/store.go](infra/store.go)、[infra/uow.go](infra/uow.go) | `AddLog`、`AddDatabase`、`AddStore`、`AddUnitOfWork` |
@@ -429,4 +422,4 @@ go test ./...
 go vet ./...
 ```
 
-当前模块未提供测试文件。上述命令不能替代集成验证；接入应用后应覆盖业务错误响应、gRPC trailer 转换、事务回滚、跨库拒绝、无事务行锁拒绝及日志文件轮转。本文数据库示例依赖应用提供连接和表结构，gRPC 示例依赖应用注册服务及建立客户端连接。
+当前模块提供不依赖真实数据库的事务单元测试，覆盖连接选择、提交、回滚、嵌套复用，以及 `ForUpdate` 在有事务时加锁、无事务时返回普通查询的行为。上述命令不能替代集成验证；接入应用后应覆盖业务错误响应、gRPC trailer 转换、真实数据库事务回滚与行锁行为及日志文件轮转。本文数据库示例依赖应用提供连接和表结构，gRPC 示例依赖应用注册服务及建立客户端连接。

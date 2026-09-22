@@ -17,15 +17,19 @@ func NewStore(db *gorm.DB) *Store {
 }
 
 func (store *Store) WithContext(ctx context.Context) *gorm.DB {
-	return TxOrDB(ctx, store.db, TxOptional)
+	db := store.db
+	if tx, ok := ctx.Value(txKey{}).(*gorm.DB); ok && tx != nil {
+		db = tx
+	}
+	return db.Session(&gorm.Session{NewDB: true, Context: ctx})
 }
 
 func (store *Store) ForUpdate(ctx context.Context) *gorm.DB {
-	query := TxOrDB(ctx, store.db, TxRequired)
-	if query.Error != nil {
-		return query
+	query := store.WithContext(ctx)
+	if tx, ok := ctx.Value(txKey{}).(*gorm.DB); ok && tx != nil {
+		return query.Clauses(clause.Locking{Strength: "UPDATE"})
 	}
-	return query.Clauses(clause.Locking{Strength: "UPDATE"})
+	return query
 }
 
 func AddStore() ioc.ServiceCollectionExtension {

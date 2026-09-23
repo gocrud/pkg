@@ -11,6 +11,7 @@ Go 服务端公共组件库，提供业务错误、Gin 响应、gRPC 错误转�
 - [业务错误 errorx](#业务错误-errorx)
 - [HTTP 响应 ginx](#http-响应-ginx)
 - [gRPC 校验与错误 grpcx](#grpc-校验与错误-grpcx)
+- [go-micro gRPC 扩展 microx](#go-micro-grpc-扩展-microx)
 - [数据库与事务 infra](#数据库与事务-infra)
 - [日志 logx](#日志-logx)
 - [依赖注入接入](#依赖注入接入)
@@ -21,7 +22,7 @@ Go 服务端公共组件库，提供业务错误、Gin 响应、gRPC 错误转�
 
 - Go **1.27.0 或更高版本**，以 [go.mod](go.mod) 为准。
 - 数据库支持 MySQL 和 PostgreSQL；只有使用数据库相关组件时才需要数据库实例。
-- 主要依赖包括 Gin、gRPC、GORM、zerolog、lumberjack，以及 `github.com/gocrud/ioc` 和 `github.com/gocrud/veri`。
+- 主要依赖包括 Gin、gRPC、GORM、zerolog、lumberjack，以及 `github.com/gocrud/ioc`、`github.com/gocrud/veri` 和 go-micro v6（`go-micro.dev/v6`，仅供 `microx` 使用）。
 
 在消费方的 Go 模块中安装：
 
@@ -38,6 +39,7 @@ go get github.com/gocrud/pkg
 | `/errorx` | `errorx` | 业务错误、错误码、内部错误包装 | [errorx/error.go](errorx/error.go)、[errorx/codes.go](errorx/codes.go) |
 | `/ginx` | **`httpx`** | Gin 统一响应、错误处理中间件 | [ginx/response.go](ginx/response.go)、[ginx/middleware_error.go](ginx/middleware_error.go) |
 | `/grpcx` | `grpcx` | Unary 请求校验、服务端与客户端错误转换 | [grpcx/interceptors.go](grpcx/interceptors.go)、[grpcx/translator.go](grpcx/translator.go) |
+| `/microx` | `microx` | go-micro v6 gRPC 校验与错误转换 | [microx/wrapper.go](microx/wrapper.go)、[microx/translator.go](microx/translator.go)、[microx/codes.go](microx/codes.go) |
 | `/infra` | `infra` | 数据库注册、模型、Store、工作单元 | [infra/database.go](infra/database.go)、[infra/model.go](infra/model.go)、[infra/store.go](infra/store.go)、[infra/uow.go](infra/uow.go) |
 | `/logx` | `logx` | zerolog 初始化、多目标输出、文件轮转 | [logx/config.go](logx/config.go)、[logx/log.go](logx/log.go)、[logx/writer.go](logx/writer.go)、[logx/ioc.go](logx/ioc.go) |
 
@@ -52,6 +54,7 @@ go get github.com/gocrud/pkg
 | `errorx.ErrOK` | `SUCCESS` | 成功 |
 | `errorx.ErrInternal` | `ERR_SYS` | 内部错误 |
 | `errorx.ErrParam` | `ERR_PARAM` | 参数错误 |
+| `errorx.ErrUnauthorized` | `ERR_UNAUTH` | 身份未认证 |
 
 业务可以自定义字符串错误码，例如 `USER_NOT_FOUND`。
 
@@ -171,13 +174,13 @@ func NewServer() *grpc.Server {
         grpcx.UnaryServerValidationInterceptor("/grpc.health.v1.Health/Check"),
         func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
             response, err := handler(ctx, req)
-            return response, grpcx.HandleServerError(ctx, err)
+            return response, grpcx.ToGRPCError(ctx, err)
         },
     ))
 }
 ```
 
-上面的第二个拦截器是消费方示例代码，不是本库导出的 API。它统一转换 handler 返回的错误；也可以不添加它，改为在每个 RPC 方法中显式调用 `HandleServerError`。两种方式选一种，避免重复转换。
+上面的第二个拦截器是消费方示例代码，不是本库导出的 API。它统一转换 handler 返回的错误；也可以不添加它，改为在每个 RPC 方法中显式调用 `ToGRPCError`。两种方式选一种，避免重复转换。
 
 `UnaryServerValidationInterceptor(skipMethods...)`：
 
@@ -197,7 +200,7 @@ func NewServer() *grpc.Server {
 
 Trailer 键为 `HeaderBizCode` (`x-biz-code`)、`HeaderBizReason` (`x-biz-reason`)、`HeaderBizDetail` (`x-biz-detail`)。字段详情采用 `field:message; field:message` 文本，不是 JSON。
 
-注意：手工创建 `errorx.E(errorx.ErrParam, ...)` 属于普通业务错误，在 gRPC 中映射为 `Aborted`；只有 `*veri.ValidationErrors` 分支映射为 `InvalidArgument`。已有 gRPC status 错误若不满足业务错误条件，也会被转换为 `Internal`，不会原样透传。`HandleServerError` 不记录日志，应由服务端自行记录内部原因。
+注意：手工创建 `errorx.E(errorx.ErrParam, ...)` 属于普通业务错误，在 gRPC 中映射为 `Aborted`；只有 `*veri.ValidationErrors` 分支映射为 `InvalidArgument`。已有 gRPC status 错误若不满足业务错误条件，也会被转换为 `Internal`，不会原样透传。`ToGRPCError` 不记录日志，应由服务端自行记录内部原因。
 
 ### 客户端还原
 
@@ -215,12 +218,72 @@ import (
 func Invoke(ctx context.Context, conn grpc.ClientConnInterface, method string, request, response any) error {
     var trailer metadata.MD
     err := conn.Invoke(ctx, method, request, response, grpc.Trailer(&trailer))
-    _, translated := grpcx.HandleClientError(err, trailer)
+    _, translated := grpcx.FromGRPCError(err, trailer)
     return translated
 }
 ```
 
-生成的客户端方法同样可以追加 `grpc.Trailer(&trailer)` 调用选项。`HandleClientError` 返回 `(converted bool, err error)`：仅对 `Aborted`、`Internal`、`InvalidArgument` 且存在非空 `x-biz-code` 的错误返回 `true` 并构造 `errorx.E`；其他错误原样返回，nil 返回 `(false, nil)`。当前不会还原 `x-biz-detail`，也不会保留原 gRPC 错误作为 cause。
+生成的客户端方法同样可以追加 `grpc.Trailer(&trailer)` 调用选项。`FromGRPCError` 返回 `(converted bool, err error)`：仅对 `Aborted`、`Internal`、`InvalidArgument` 且存在非空 `x-biz-code` 的错误返回 `true` 并构造 `errorx.E`；其他错误原样返回，nil 返回 `(false, nil)`。当前不会还原 `x-biz-detail`，也不会保留原 gRPC 错误作为 cause。
+
+## go-micro gRPC 扩展 microx
+
+面向 go-micro v6 的 gRPC server/client 场景(原生 gRPC 兼容)，提供与 `grpcx` 对齐的请求校验与错误转换。go-micro 原生结构化错误 `*errors.Error` 本身就是 JSON 自描述的完整载体：业务码放入 `Reason`，`Code` 字段采用 HTTP 风格并由 `server/grpc` 自动映射为 gRPC status code，因此无需 grpcx 的 trailer 机制。
+
+### 服务端接入
+
+```go
+package example
+
+import (
+    "context"
+
+    "github.com/gocrud/pkg/microx"
+    "go-micro.dev/v6"
+    "go-micro.dev/v6/server"
+    grpcServer "go-micro.dev/v6/server/grpc"
+)
+
+func NewService() micro.Service {
+    service := micro.NewService("helloworld",
+        micro.Server(grpcServer.NewServer(
+            server.Name("helloworld"),
+            server.Address(":8080"),
+            grpcServer.Reflection(),
+            server.WrapHandler(
+                microx.ValidationHandlerWrapper("Health.Check"),
+                func(next server.HandlerFunc) server.HandlerFunc {
+                    return func(ctx context.Context, req server.Request, rsp any) error {
+                        return microx.ToMicroError(next(ctx, req, rsp))
+                    }
+                },
+            ),
+        )),
+    )
+    return service
+}
+```
+
+上面的第二个 wrapper 是消费方示例代码，不是本库导出的 API；它统一转换 handler 返回的错误，也可以改为在每个 handler 方法中显式调用 `ToMicroError`。`ValidationHandlerWrapper(skipEndpoints...)` 的跳过列表精确匹配 `req.Endpoint()`，格式如 `Say.Hello`。
+
+### 协议映射
+
+| 服务端错误 | HTTP Code | gRPC code | Reason |
+| --- | --- | --- | --- |
+| `nil` | 无错误 | 无错误 | 无 |
+| `*veri.ValidationErrors` | 400 | `InvalidArgument` | `ERR_PARAM` |
+| `CodeStr/MsgStr`，code 为 `ERR_UNAUTH` | 401 | `Unauthenticated` | `ERR_UNAUTH` |
+| `CodeStr/MsgStr`，其余业务码 | 400 | `InvalidArgument` | 业务码 |
+| 其他错误，包括 `ERR_SYS` | 500 | `Internal` | `ERR_SYS` |
+
+字段详情采用 `field:message; field:message` 拼入 `Detail`。内部错误不向客户端暴露原因，统一返回“系统繁忙，请稍后再试”。
+
+### 客户端还原
+
+`FromMicroError(err)` 返回 `(converted bool, err error)`：用 `errors.As` 提取 `*errors.Error`，`Reason` 非空时还原为 `errorx.E(reason, detail)`；`Reason` 为空时按 `Code` 兜底(400→`ERR_PARAM`、401→`ERR_UNAUTH`、500→`ERR_SYS`)，其余原样返回，nil 返回 `(false, nil)`。
+
+### HTTP↔gRPC 对照
+
+`HTTPCodeToGRPC` / `GRPCCodeToHTTP` 提供 HTTP 风格错误码与 gRPC status code 的双向翻译，映射与 go-micro 内置 `server/grpc`/`client/grpc` 保持一致。核心四档：200↔0、400↔3、401↔16、500↔13。
 
 ## 数据库与事务 infra
 
@@ -385,7 +448,8 @@ func Register(sc *ioc.ServiceCollection, dsn string, cfg *logx.Config) *ioc.Serv
 | --- | --- | --- |
 | 业务错误、用户提示、cause | [errorx/error.go](errorx/error.go) | `E`、`Wrap`、`BizError` |
 | Gin、HTTP、统一响应、参数错误 | [ginx/response.go](ginx/response.go)、[ginx/middleware_error.go](ginx/middleware_error.go) | `httpx.Ok`、`Fail`、`FailParam`、`AutoErrorInterceptor` |
-| RPC、Validate、trailer、错误还原 | [grpcx/interceptors.go](grpcx/interceptors.go)、[grpcx/translator.go](grpcx/translator.go) | `UnaryServerValidationInterceptor`、`HandleServerError`、`HandleClientError` |
+| RPC、Validate、trailer、错误还原 | [grpcx/interceptors.go](grpcx/interceptors.go)、[grpcx/translator.go](grpcx/translator.go) | `UnaryServerValidationInterceptor`、`ToGRPCError`、`FromGRPCError` |
+| go-micro、gRPC、校验、错误转换 | [microx/wrapper.go](microx/wrapper.go)、[microx/translator.go](microx/translator.go)、[microx/codes.go](microx/codes.go) | `ValidationHandlerWrapper`、`ToMicroError`、`FromMicroError`、`HTTPCodeToGRPC`、`GRPCCodeToHTTP` |
 | GORM、MySQL、PostgreSQL、连接注册 | [infra/database.go](infra/database.go) | `AddDatabase` |
 | 事务、行锁、仓储、工作单元 | [infra/uow.go](infra/uow.go)、[infra/store.go](infra/store.go) | `Execute`、`WithContext`、`ForUpdate` |
 | 持久化模型、时间戳、软删除 | [infra/model.go](infra/model.go) | `BaseModel` |
@@ -398,7 +462,7 @@ func Register(sc *ioc.ServiceCollection, dsn string, cfg *logx.Config) *ioc.Serv
 2. 以源码为准，不虚构 Redis 封装、配置加载器、通用 CRUD、流式 RPC 拦截器或自动迁移功能；依赖中出现某个库不代表已有对应功能。
 3. HTTP 导入路径是 `/ginx`，包标识符是 `httpx`；错误响应依赖 `AutoErrorInterceptor`。
 4. 区分 HTTP 顶层业务错误断言与 gRPC 的错误链识别；不要统一假设它们都支持任意包装。
-5. gRPC 校验与 handler 错误转换是两步，客户端还原必须取得 trailer。
+5. RPC 校验与 handler 错误转换是两步。grpcx 客户端还原必须取得 trailer；microx 直接读 go-micro 结构化错误，不需要 trailer。
 6. 事务内使用 txCtx；行锁必须在事务内；不要把嵌套 Execute 当成独立提交或局部回滚。
 7. 使用非 nil 的日志配置，显式选择输出目标；不在示例或日志里写真实凭据。
 8. 修改后执行与改动相关的检查，明确区分编译通过与真实数据库 / RPC 集成验证通过。
@@ -422,4 +486,4 @@ go test ./...
 go vet ./...
 ```
 
-当前模块提供不依赖真实数据库的事务单元测试，覆盖连接选择、提交、回滚、嵌套复用，以及 `ForUpdate` 在有事务时加锁、无事务时返回普通查询的行为。上述命令不能替代集成验证；接入应用后应覆盖业务错误响应、gRPC trailer 转换、真实数据库事务回滚与行锁行为及日志文件轮转。本文数据库示例依赖应用提供连接和表结构，gRPC 示例依赖应用注册服务及建立客户端连接。
+当前模块提供不依赖真实数据库的单元测试：基础设施事务测试覆盖连接选择、提交、回滚、嵌套复用，以及 `ForUpdate` 在有事务时加锁、无事务时返回普通查询的行为；`microx` 测试覆盖错误映射、业务码还原、HTTP↔gRPC 码转换与校验包装。上述命令不能替代集成验证；接入应用后应覆盖业务错误响应、grpcx trailer 转换与 microx 结构化错误还原、真实数据库事务回滚与行锁行为及日志文件轮转。本文数据库示例依赖应用提供连接和表结构，gRPC 示例依赖应用注册服务及建立客户端连接。

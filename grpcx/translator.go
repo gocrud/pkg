@@ -25,7 +25,7 @@ type bizErrorSniffer interface {
 	MsgStr() string
 }
 
-func HandleServerError(ctx context.Context, err error) error {
+func ToGRPCError(ctx context.Context, err error) error {
 	if err == nil {
 		return nil
 	}
@@ -57,7 +57,7 @@ func HandleServerError(ctx context.Context, err error) error {
 	return status.Error(codes.Internal, "系统内部错误")
 }
 
-func HandleClientError(err error, trailer metadata.MD) (bool, error) {
+func FromGRPCError(err error, trailer metadata.MD) (bool, error) {
 	if err == nil {
 		return false, nil
 	}

@@ -21,7 +21,7 @@ func UnaryServerValidationInterceptor(skipMethods ...string) grpc.UnaryServerInt
 		}
 		if verifier, ok := req.(verifierSniffer); ok {
 			if err := verifier.Validate(); err != nil {
-				return nil, HandleServerError(ctx, err)
+				return nil, ToGRPCError(ctx, err)
 			}
 		}
 		return handler(ctx, req)

@@ -13,6 +13,7 @@ Go 服务端公共组件库，提供业务错误、Gin 响应、gRPC 错误转�
 - [gRPC 校验与错误 grpcx](#grpc-校验与错误-grpcx)
 - [go-micro gRPC 扩展 microx](#go-micro-grpc-扩展-microx)
 - [数据库与事务 infra](#数据库与事务-infra)
+- [分布式事务 seatax](#分布式事务-seatax)
 - [日志 logx](#日志-logx)
 - [依赖注入接入](#依赖注入接入)
 - [SKILL 使用指南](#skill-使用指南)
@@ -22,7 +23,7 @@ Go 服务端公共组件库，提供业务错误、Gin 响应、gRPC 错误转�
 
 - Go **1.27.0 或更高版本**，以 [go.mod](go.mod) 为准。
 - 数据库支持 MySQL 和 PostgreSQL；只有使用数据库相关组件时才需要数据库实例。
-- 主要依赖包括 Gin、gRPC、GORM、zerolog、lumberjack，以及 `github.com/gocrud/ioc`、`github.com/gocrud/veri` 和 go-micro v6（`go-micro.dev/v6`，仅供 `microx` 使用）。
+- 主要依赖：Gin、gRPC、GORM、zerolog、lumberjack、`github.com/gocrud/ioc`、`github.com/gocrud/veri`，以及 `seata.apache.org/seata-go/v2`（仅供 `seatax`）、go-micro v6（仅供 `microx`）。
 
 在消费方的 Go 模块中安装：
 
@@ -30,7 +31,7 @@ Go 服务端公共组件库，提供业务错误、Gin 响应、gRPC 错误转�
 go get github.com/gocrud/pkg
 ```
 
-生产项目应固定经过验证的 tag 或 commit。本文中的 Go 代码块是独立示例，不要将多个 `package main` 示例拼接进同一文件。
+生产项目建议固定经过验证的 tag 或 commit。
 
 ## 包与源码索引
 
@@ -41,6 +42,7 @@ go get github.com/gocrud/pkg
 | `/grpcx` | `grpcx` | Unary 请求校验、服务端与客户端错误转换 | [grpcx/interceptors.go](grpcx/interceptors.go)、[grpcx/translator.go](grpcx/translator.go) |
 | `/microx` | `microx` | go-micro v6 gRPC 校验与错误转换 | [microx/wrapper.go](microx/wrapper.go)、[microx/translator.go](microx/translator.go)、[microx/codes.go](microx/codes.go) |
 | `/infra` | `infra` | 数据库注册、模型、Store、工作单元 | [infra/database.go](infra/database.go)、[infra/model.go](infra/model.go)、[infra/store.go](infra/store.go)、[infra/uow.go](infra/uow.go) |
+| `/seatax` | `seatax` | Seata 分布式事务 TM/RM/TCC 与 gRPC、HTTP、go-micro 的 XID 传播 | [seatax/seata.go](seatax/seata.go)、[seatax/tm.go](seatax/tm.go)、[seatax/rm_datasource.go](seatax/rm_datasource.go)、[seatax/rm_gorm.go](seatax/rm_gorm.go)、[seatax/tcc.go](seatax/tcc.go) |
 | `/logx` | `logx` | zerolog 初始化、多目标输出、文件轮转 | [logx/config.go](logx/config.go)、[logx/log.go](logx/log.go)、[logx/writer.go](logx/writer.go)、[logx/ioc.go](logx/ioc.go) |
 
 特别注意：导入 `github.com/gocrud/pkg/ginx` 后，默认标识符是 `httpx`。本文显式使用 `httpx` 别名，避免根据目录名误写调用。
@@ -288,7 +290,7 @@ func NewService() micro.Service {
 | `pgsql`、`postgres`、`postgresql` | PostgreSQL |
 | 空字符串、未知值或传入多个 driver | 工厂返回错误 |
 
-driver 会去除首尾空格并转小写。DSN 使用对应 GORM 驱动格式，从消费方的配置或环境变量读取；本库不读取环境变量、不配置连接池、不迁移表结构，也不提供统一资源关闭入口。
+driver 会去除首尾空格并转小写。DSN 使用对应 GORM 驱动格式，由应用从配置或环境变量读取。
 
 `BaseModel` 提供：
 
@@ -299,7 +301,7 @@ driver 会去除首尾空格并转小写。DSN 使用对应 GORM 驱动格式，
 | `UpdatedAt` | `int64` | 秒级更新时间，自动更新 |
 | `DeletedAt` | `soft_delete.DeletedAt` | 软删除时间，0 表示未删除 |
 
-可以嵌入业务持久化模型。迁移、索引和连接池策略由应用负责；正常关闭服务时，由应用取得底层 `*sql.DB` 并管理其关闭。
+可以嵌入业务持久化模型；表迁移、索引、连接池与连接关闭由应用负责。
 
 ### Store 与 UnitOfWork
 
@@ -348,19 +350,245 @@ func Reserve(ctx context.Context, db *gorm.DB, productID, quantity int64) error 
 前提：传入已连接的 `*gorm.DB`，并已完成 `Product` 表迁移；示例不执行迁移。行锁效果取决于数据库及存储引擎的事务支持。
 
 - `NewStore(db)` 和 `NewUnitOfWork(db)` 支持不使用 IoC 的直接构造。
-- `Store.WithContext(ctx)` 优先使用 ctx 中的事务，没有事务则使用基础连接。
+- `Store.WithContext(ctx)` 返回携带当前 ctx 的新 session：优先使用 ctx 中的事务，没有事务则使用基础连接，不继承已有查询条件。
 - `Store.ForUpdate(ctx)` 在有事务上下文时添加 `FOR UPDATE` 子句；无事务时返回普通查询，不添加锁子句，也不因缺少事务而报错。
 - `UnitOfWork.Execute(ctx, action)` 在无事务时启动 GORM 事务：回调返回 nil 则提交，返回错误则回滚；panic 交由 GORM 回滚后继续传播。
 - 嵌套 `Execute` 直接复用 ctx 中的已有事务，不创建新事务或 savepoint，只有最外层负责提交或回滚。内层返回错误必须继续向外返回，否则外层仍可能提交。
 - 回调中的所有仓储操作必须传递 **`txCtx`**。传入原始 ctx 会脱离事务，绕过 Store 使用基础 db 也不会自动加入事务。
 - 不进行跨库校验：即使 Store 或 UnitOfWork 配置了其他数据库，传入事务 ctx 后仍使用 ctx 中的事务连接，不会切换数据库。事务 ctx 不能在回调结束后继续使用。
 
-### 事务职责
+## 分布式事务 seatax
 
-- Store 只根据 ctx 选择事务连接或基础连接，不开启、提交或回滚事务。返回的新 GORM session 携带当前 ctx，不继承已有查询条件。
-- UnitOfWork 通过 GORM `Transaction` 管理事务生命周期，将事务直接绑定到私有 context key，并把 `txCtx` 传给回调。
-- `ForUpdate` 在缺少事务上下文时退化为普通查询，不提供行锁保护。库存扣减等先查再改操作必须放在 `UnitOfWork.Execute` 中并传递 `txCtx`，避免遗漏事务上下文后静默失去锁保护。
-- 原有 `TxMode`、`TxOrDB` 和 `WithTx` API 已移除；事务入口统一使用 `UnitOfWork.Execute`，连接访问使用 Store。
+`seatax` 封装 [seata.apache.org/seata-go/v2](https://github.com/apache/incubator-seata-go)，同时提供 TM（全局事务）与 RM（AT / XA / TCC）能力，并为 gRPC、HTTP（gin）、go-micro 三种协议提供 XID 传播组件。所有 Seata 侧错误统一转换为 `errorx.BizError`，业务错误原样透传，可直接复用 `httpx` / `grpcx` / `microx` 的统一错误处理链路。
+
+### 错误码
+
+| 错误码 | 含义 |
+| --- | --- |
+| `SEATA_BEGIN` | 全局事务开启失败 |
+| `SEATA_COMMIT` | 全局事务提交失败 |
+| `SEATA_ROLLBACK` | 全局事务回滚失败 |
+| `SEATA_REGISTER` | 分支资源（TCC）注册失败 |
+| `SEATA_XID_MISSING` | 严格模式下缺少 XID |
+| `SEATA_CONFIG` | Seata 客户端初始化 / 配置错误 |
+
+### 初始化
+
+Seata 客户端通过 `seatago.yml` 配置（支持 yaml / yml / json / toml）。AT 模式依赖 `undo_log` 表，可用 `InitUndoLogMySQL` / `InitUndoLogPostgres` 初始化（见「场景五」）。Seata Server 地址与事务分组配置示例：
+
+```yaml
+# seatago.yml
+server:
+  service_group:
+    default_tx_group: default
+seata:
+  service:
+    vgroup-mapping:
+      default_tx_group: default
+    grouplist:
+      default: 127.0.0.1:8091
+  registry:
+    type: file
+  config:
+    type: file
+```
+
+```go
+if err := seatax.Init("./seatago.yml"); err != nil {
+    return err
+}
+// 或使用内嵌配置
+if err := seatax.InitFromConf(seatagoConf); err != nil {
+    return err
+}
+```
+
+`Init` 幂等，重复调用无副作用；配置缺失或非法时返回 `SEATA_CONFIG` 错误。注意：Seata 代理数据库驱动在 `Init` 成功后才注册，数据源必须初始化完成后再打开。
+
+### 场景一：TM 全局事务
+
+`WithGlobalTx` 按回调执行结果自动提交或回滚；业务错误码原样透传，回滚失败时保留业务错误码并附加 seata 二阶段失败作为 cause：
+
+```go
+package example
+
+import (
+    "context"
+    "time"
+
+    "github.com/gocrud/pkg/errorx"
+    "github.com/gocrud/pkg/seatax"
+)
+
+func CreateOrder(ctx context.Context) error {
+    return seatax.WithGlobalTx(ctx, "create-order", func(txCtx context.Context) error {
+        // 扣库存、创建订单……任意一步返回错误即触发全局回滚
+        if err := deductStock(txCtx); err != nil {
+            return errorx.Wrap(err, "扣减库存失败")
+        }
+        return createOrderRecord(txCtx)
+    }, seatax.WithTimeout(30*time.Second))
+}
+```
+
+全局事务内通过 `seatax.GetXID(ctx)` 读取 XID；传播行为可用 `WithPropagation(tm.NotSupported)` 等调整，锁重试可用 `WithLockRetry(interval, times)` 配置。
+
+### 场景二：HTTP（gin）服务端
+
+默认严格模式：请求未携带 XID 时返回 `SEATA_XID_MISSING` 业务错误（`c.Error` + `c.Abort`），由 `httpx.AutoErrorInterceptor` 统一渲染为 HTTP 200 的 `Result`；确需放行无 XID 请求时用 `WithAllowMissingXID()` 切换为宽松模式：
+
+```go
+package example
+
+import (
+    "github.com/gin-gonic/gin"
+    "github.com/rs/zerolog"
+    httpx "github.com/gocrud/pkg/ginx"
+    "github.com/gocrud/pkg/seatax"
+)
+
+func NewRouter(logger zerolog.Logger) *gin.Engine {
+    r := gin.New()
+    r.Use(seatax.GinTransactionMiddleware(), httpx.AutoErrorInterceptor(logger))
+    r.POST("/order", func(c *gin.Context) {
+        // handler 内 seatax.GetXID(c.Request.Context()) 即上游 XID
+        httpx.Ok(c, nil)
+    })
+    return r
+}
+```
+
+XID 头名称为 `TX_XID`（兼容小写 `tx_xid`）。上游通过 `seatax.InjectXIDHeader(req, xid)` 注入。gin >= 1.8.1 时若需通过 `c.Value()` 读取 seata 上下文，须将引擎的 `ContextWithFallback` 置为 true。
+
+### 场景三：gRPC
+
+服务端拦截器恢复 XID，客户端拦截器自动注入 XID，与 `grpcx` 校验拦截器组合使用：
+
+```go
+// 服务端
+grpc.NewServer(grpc.ChainUnaryInterceptor(
+    seatax.ServerTransactionInterceptor(),
+    grpcx.UnaryServerValidationInterceptor(),
+))
+
+// 客户端
+grpc.Dial(target,
+    grpc.WithUnaryInterceptor(seatax.ClientTransactionInterceptor()),
+    grpc.WithStreamInterceptor(seatax.ClientTransactionStreamInterceptor()))
+```
+
+### 场景四：go-micro
+
+服务端 wrapper 恢复 XID，客户端 wrapper 注入 XID，与 `microx` 的校验、错误 wrapper 组合使用：
+
+```go
+micro.NewService(
+    micro.WrapHandler(seatax.MicroServerTransactionWrapper(), microx.ValidationHandlerWrapper(), microx.ErrorHandlerWrapper()),
+    micro.WrapClient(seatax.MicroClientTransactionWrapper()),
+)
+```
+
+### 场景五：RM 数据源（AT / XA）
+
+```go
+db, err := seatax.OpenATMySQL("user:pass@tcp(127.0.0.1:3306)/db?parseTime=true")
+db, err = seatax.OpenATPostgres("host=127.0.0.1 user=postgres dbname=db sslmode=disable")
+db, err = seatax.OpenXAMySQL("user:pass@tcp(127.0.0.1:3306)/db?parseTime=true")
+db, err = seatax.OpenXAPostgres("host=127.0.0.1 user=postgres dbname=db sslmode=disable")
+```
+
+返回标准 `*sql.DB`（代理驱动），可直接执行 SQL 或交给 gorm。AT 模式依赖 `undo_log` 表；XA 模式要求数据库支持 XA 协议。驱动未注册（未调用 `Init`）时返回 `SEATA_CONFIG` 错误。
+
+AT 模式可用 `seatax` 内置方法初始化 `undo_log` 表（0.3.0+ 含唯一索引 `ux_undo_log`），在业务库上执行一次即可（传入普通 `*gorm.DB`，重复调用幂等）：
+
+```go
+gdb, err := gorm.Open(mysql.Open(dsn), &gorm.Config{})
+if err != nil {
+    return err
+}
+if err := seatax.InitUndoLogMySQL(gdb); err != nil { // MySQL
+    return err
+}
+
+pdb, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
+if err != nil {
+    return err
+}
+if err := seatax.InitUndoLogPostgres(pdb); err != nil { // PostgreSQL（字符串列使用 text）
+    return err
+}
+```
+
+### 场景六：RM gorm 与 IoC
+
+```go
+gdb, err := seatax.OpenGorm(seatax.ModeAT, "mysql", dsn)   // 等价 seatax.OpenATGorm
+gdb, err = seatax.OpenGorm(seatax.ModeXA, "postgres", dsn) // 等价 seatax.OpenXAGorm
+```
+
+`AddDatabase` 与 `infra.AddDatabase` 同风格的 IoC 注册，把 seata 数据源注册为 `*gorm.DB` 单例：
+
+```go
+package example
+
+import (
+    "github.com/gocrud/ioc"
+    "github.com/gocrud/pkg/seatax"
+)
+
+func Register(sc *ioc.ServiceCollection, dsn string) *ioc.ServiceCollection {
+    sc = seatax.AddDatabase(dsn, "seata-at-mysql")(sc) // 驱动名或方言:mysql / postgres / seata-xa-*
+    return sc
+}
+```
+
+### 场景七：TCC
+
+```go
+package example
+
+import (
+    "context"
+
+    "github.com/gocrud/pkg/seatax"
+)
+
+type OrderTCC struct{}
+
+func (*OrderTCC) GetActionName() string { return "orderTCC" }
+
+func (*OrderTCC) Prepare(ctx context.Context, params interface{}) (bool, error) {
+    // 一阶段资源预留
+    return true, nil
+}
+
+func (*OrderTCC) Commit(ctx context.Context, bac *seatax.BusinessActionContext) (bool, error) {
+    return true, nil
+}
+
+func (*OrderTCC) Rollback(ctx context.Context, bac *seatax.BusinessActionContext) (bool, error) {
+    return true, nil
+}
+
+var orderProxy, _ = seatax.NewTCCProxy(&OrderTCC{}) // 注册失败返回 SEATA_REGISTER
+
+func Reserve(ctx context.Context) error {
+    return seatax.WithGlobalTx(ctx, "tcc-order", func(txCtx context.Context) error {
+        _, err := orderProxy.Prepare(txCtx, reserveParams)
+        return err
+    })
+}
+```
+
+### 错误处理兼容矩阵
+
+| 场景 | seatax 行为 | 协议层渲染 |
+| --- | --- | --- |
+| 业务回调返回 `errorx.BizError` | 触发回滚后原样透传业务错误码 | `httpx` / `grpcx` / `microx` 按业务错误码正常渲染 |
+| 业务回调 panic | 回滚后转换为 `ERR_SYS` 内部错误 | 协议层按内部错误渲染 |
+| 开启 / 提交 / 回滚失败 | `SEATA_BEGIN` / `SEATA_COMMIT` / `SEATA_ROLLBACK` | 非 `ERR_*` 码按业务错误渲染（httpx 输出 HTTP 200 Result，grpcx/microx 走约定转换） |
+| 回滚失败且业务失败 | 保留业务错误码，seata 失败作为 cause | 业务错误码渲染不受影响 |
+| 严格模式缺 XID | `SEATA_XID_MISSING` | 与上同理，统一链路渲染 |
 
 ## 日志 logx
 
@@ -445,6 +673,7 @@ func Register(sc *ioc.ServiceCollection, dsn string, cfg *logx.Config) *ioc.Serv
 | 持久化模型、时间戳、软删除 | [infra/model.go](infra/model.go) | `BaseModel` |
 | 日志、轮转、控制台、文件 | [logx/config.go](logx/config.go)、[logx/writer.go](logx/writer.go)、[logx/log.go](logx/log.go) | `Config`、`NewInstance` |
 | IoC、单例注册 | [logx/ioc.go](logx/ioc.go)、[infra/database.go](infra/database.go)、[infra/store.go](infra/store.go)、[infra/uow.go](infra/uow.go) | `AddLog`、`AddDatabase`、`AddStore`、`AddUnitOfWork` |
+| 分布式事务、TM/RM、XID 传播 | [seatax/tm.go](seatax/tm.go)、[seatax/rm_datasource.go](seatax/rm_datasource.go)、[seatax/rm_gorm.go](seatax/rm_gorm.go)、[seatax/tcc.go](seatax/tcc.go)、[seatax/grpc.go](seatax/grpc.go)、[seatax/gin.go](seatax/gin.go)、[seatax/micro.go](seatax/micro.go) | `Init`、`WithGlobalTx`、`OpenATGorm`、`OpenXAGorm`、`AddDatabase`、`NewTCCProxy`、`GinTransactionMiddleware`、`ServerTransactionInterceptor`、`MicroServerTransactionWrapper` |
 
 ### 执行约束
 
@@ -456,6 +685,7 @@ func Register(sc *ioc.ServiceCollection, dsn string, cfg *logx.Config) *ioc.Serv
 6. 事务内使用 txCtx；行锁必须在事务内；不要把嵌套 Execute 当成独立提交或局部回滚。
 7. 使用非 nil 的日志配置，显式选择输出目标；不在示例或日志里写真实凭据。
 8. 修改后执行与改动相关的检查，明确区分编译通过与真实数据库 / RPC 集成验证通过。
+9. seatax 必须先 `Init` 再打开数据源（代理驱动在初始化后才注册）；业务错误原样透传，seata 二阶段失败使用 `SEATA_*` 错误码；gin 中间件默认严格模式（缺 XID 拒绝），放行缺 XID 请求用 `WithAllowMissingXID()`。
 
 可在已有 SKILL 中使用以下任务描述作为引用模板，路径按消费方工作区调整：
 
@@ -476,4 +706,4 @@ go test ./...
 go vet ./...
 ```
 
-当前模块提供不依赖真实数据库的单元测试：基础设施事务测试覆盖连接选择、提交、回滚、嵌套复用，以及 `ForUpdate` 在有事务时加锁、无事务时返回普通查询的行为；`microx` 测试覆盖错误映射、业务码还原与校验包装。上述命令不能替代集成验证；接入应用后应覆盖业务错误响应、grpcx trailer 转换与 microx 结构化错误还原、真实数据库事务回滚与行锁行为及日志文件轮转。本文数据库示例依赖应用提供连接和表结构，gRPC 示例依赖应用注册服务及建立客户端连接。
+当前模块提供不依赖真实数据库的单元测试：基础设施事务测试覆盖连接选择、提交、回滚、嵌套复用，以及 `ForUpdate` 在有事务时加锁、无事务时返回普通查询的行为；`microx` 测试覆盖错误映射、业务码还原与校验包装；`seatax` 测试以 mock 事务管理器覆盖全局事务提交、回滚、panic、二阶段失败时的错误保留，以及 gRPC / gin / go-micro 的 XID 传播。上述命令不能替代集成验证；接入应用后应覆盖业务错误响应、grpcx trailer 转换与 microx 结构化错误还原、真实数据库事务回滚与行锁行为及日志文件轮转；seatax 还需在真实 Seata Server 与数据库环境下验证 AT / XA 分支注册、回滚日志与 TCC 二阶段回调。本文数据库示例依赖应用提供连接和表结构，gRPC 示例依赖应用注册服务及建立客户端连接。

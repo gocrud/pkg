@@ -33,3 +33,14 @@ func ValidationHandlerWrapper(skipEndpoints ...string) server.HandlerWrapper {
 		}
 	}
 }
+
+// ErrorHandlerWrapper 返回一个 server.HandlerWrapper:调用业务 handler 后,
+// 将其返回的错误经 ToMicroError 统一翻译为 go-micro 结构化错误。
+// 与 ValidationHandlerWrapper 搭配使用,可省去手写错误翻译闭包。
+func ErrorHandlerWrapper() server.HandlerWrapper {
+	return func(next server.HandlerFunc) server.HandlerFunc {
+		return func(ctx context.Context, req server.Request, rsp interface{}) error {
+			return ToMicroError(next(ctx, req, rsp))
+		}
+	}
+}

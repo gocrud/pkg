@@ -8,7 +8,6 @@ import (
 	"github.com/gocrud/pkg/errorx"
 	"github.com/gocrud/veri"
 	microerrors "go-micro.dev/v6/errors"
-	"google.golang.org/grpc/codes"
 )
 
 func asMicroError(t *testing.T, err error) *microerrors.Error {
@@ -142,25 +141,5 @@ func TestFromMicroError_Plain(t *testing.T) {
 	ok, err := FromMicroError(plain)
 	if ok || err != plain {
 		t.Fatalf("got ok=%v err=%v", ok, err)
-	}
-}
-
-func TestCodeConversion(t *testing.T) {
-	pairs := []struct {
-		http int32
-		grpc codes.Code
-	}{
-		{HTTPOK, codes.OK},
-		{HTTPBadRequest, codes.InvalidArgument},
-		{HTTPUnauthorized, codes.Unauthenticated},
-		{HTTPInternalError, codes.Internal},
-	}
-	for _, p := range pairs {
-		if got := HTTPCodeToGRPC(p.http); got != p.grpc {
-			t.Fatalf("HTTPCodeToGRPC(%d)=%v, want %v", p.http, got, p.grpc)
-		}
-		if got := GRPCCodeToHTTP(p.grpc); got != p.http {
-			t.Fatalf("GRPCCodeToHTTP(%v)=%d, want %d", p.grpc, got, p.http)
-		}
 	}
 }

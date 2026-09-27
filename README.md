@@ -26,7 +26,7 @@ go get github.com/gocrud/pkg
 
 ## 通用约定
 
-- 错误统一走 `errorx`：`Define(code, msg)` 声明错误码，`CodeOf` / `ErrorOf` 提取业务码与消息；协议层通用码 `SUCCESS` / `ERR_PARAM` / `ERR_UNAUTH` / `ERR_SYS`。
+- 错误统一走 `errorx`：`Define(code, msg)` 声明错误码，`CodeOf` / `ErrorOf` 提取业务码与消息。
 - 协议出口（ginx / grpcx / microx）通过 `errorx.ErrorOf` 沿 `Unwrap` 链识别业务错误并渲染，内部错误不向客户端暴露原因。
 - 依赖注入：`infra.Add*`、`logx.AddLog`、`seatax.AddDatabase` 均返回 `ioc.ServiceCollectionExtension`。
 - 事务内必须使用回调传入的 `txCtx`；嵌套 `Execute` 复用外层事务。

@@ -1,4 +1,4 @@
-package httpx
+package ginx
 
 import (
 	"net/http"
@@ -7,9 +7,11 @@ import (
 	"github.com/gocrud/pkg/errorx"
 )
 
+// errParamFormat 参数格式错误的哨兵(携带用户提示)。
+var errParamFormat = errorx.Define(errorx.ErrParam, "请求参数格式错误")
+
 func FailParam(ctx *gin.Context) {
-	err := errorx.E(errorx.ErrParam, "请求参数格式错误")
-	_ = ctx.Error(err)
+	_ = ctx.Error(errParamFormat)
 	ctx.Abort()
 }
 

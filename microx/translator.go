@@ -14,16 +14,10 @@ import (
 // 与 go-micro 客户端内置的 "go.micro.client" 对称。
 const defaultServerID = "go.micro.server"
 
-// bizErrorSniffer 是识别 errorx.BizError 的接口,与 grpcx 保持一致。
-type bizErrorSniffer interface {
-	CodeStr() string
-	MsgStr() string
-}
-
 // ToMicroError 将业务 handler 返回的错误翻译成 go-micro 结构化错误
 // (*microerrors.Error)。识别顺序与 grpcx.ToGRPCError 对齐:
 //  1. veri.ValidationErrors → 400 参数校验失败(Reason=ERR_PARAM,字段明细拼入 Detail)
-//  2. errorx.BizError(非内部错误) → 按业务码归类(ERR_UNAUTH→401,其余→400,Reason=业务码)
+//  2. errorx 业务错误(非内部错误) → 按业务码归类(ERR_UNAUTH→401,其余→400,Reason=业务码)
 //  3. 其余(内部错误、未知错误) → 500 系统繁忙(Reason=ERR_SYS)
 func ToMicroError(err error) error {
 	if err == nil {
@@ -40,12 +34,11 @@ func ToMicroError(err error) error {
 		}
 	}
 
-	var biz bizErrorSniffer
-	if errors.As(err, &biz) && biz.CodeStr() != errorx.ErrInternal {
+	if biz, ok := errorx.ErrorOf(err); ok && biz.CodeStr() != errorx.ErrInternal {
 		return &microerrors.Error{
 			Id:     defaultServerID,
 			Code:   httpCodeForBiz(biz.CodeStr()),
-			Detail: biz.MsgStr(),
+			Detail: biz.Msg(),
 			Reason: biz.CodeStr(),
 		}
 	}
@@ -58,7 +51,7 @@ func ToMicroError(err error) error {
 	}
 }
 
-// FromMicroError 将 go-micro 客户端调用返回的错误还原成 errorx.BizError。
+// FromMicroError 将 go-micro 客户端调用返回的错误还原成 errorx 业务错误。
 // 返回值 ok 表示是否已成功还原;ok=false 时返回原始错误。
 func FromMicroError(err error) (bool, error) {
 	if err == nil {
@@ -69,16 +62,16 @@ func FromMicroError(err error) (bool, error) {
 		return false, err
 	}
 	if merr.Reason != "" {
-		return true, errorx.E(merr.Reason, merr.Detail)
+		return true, errorx.Define(merr.Reason, merr.Detail)
 	}
 	// 非本库服务端或 Reason 丢失时,按 HTTP 状态码兜底归类。
 	switch merr.Code {
 	case HTTPBadRequest:
-		return true, errorx.E(errorx.ErrParam, merr.Detail)
+		return true, errorx.Define(errorx.ErrParam, merr.Detail)
 	case HTTPUnauthorized:
-		return true, errorx.E(errorx.ErrUnauthorized, merr.Detail)
+		return true, errorx.Define(errorx.ErrUnauthorized, merr.Detail)
 	case HTTPInternalError:
-		return true, errorx.E(errorx.ErrInternal, merr.Detail)
+		return true, errorx.Define(errorx.ErrInternal, merr.Detail)
 	default:
 		return false, err
 	}

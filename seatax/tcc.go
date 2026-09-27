@@ -1,7 +1,6 @@
 package seatax
 
 import (
-	"github.com/gocrud/pkg/errorx"
 	seataRM "seata.apache.org/seata-go/v2/pkg/rm"
 	seataTCC "seata.apache.org/seata-go/v2/pkg/rm/tcc"
 	seataTM "seata.apache.org/seata-go/v2/pkg/tm"
@@ -28,16 +27,16 @@ type BusinessActionContext = seataTM.BusinessActionContext
 // 业务在一阶段调用 proxy.Prepare(ctx, params),二阶段由 SDK 回调服务的
 // Commit / Rollback。注册失败返回 CodeRegister 业务错误。
 // 注意:SDK 对非指针入参等非法服务会直接 panic,这里统一收敛为业务错误。
-func NewTCCProxy(service interface{}) (proxy *TCCServiceProxy, err error) {
+func NewTCCProxy(service any) (proxy *TCCServiceProxy, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			proxy = nil
-			err = errorx.E(CodeRegister, "注册 TCC 资源失败", toError(r))
+			err = newBizErr(CodeRegister, "注册 TCC 资源失败", toError(r))
 		}
 	}()
 	p, e := seataTCC.NewTCCServiceProxy(service)
 	if e != nil {
-		return nil, errorx.E(CodeRegister, "注册 TCC 资源失败", e)
+		return nil, newBizErr(CodeRegister, "注册 TCC 资源失败", e)
 	}
 	return p, nil
 }

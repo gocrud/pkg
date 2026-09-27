@@ -3,127 +3,122 @@ package seatax
 import (
 	"database/sql"
 	"fmt"
-	"strings"
 
 	"github.com/gocrud/ioc"
 	"github.com/gocrud/pkg/errorx"
 	"gorm.io/driver/mysql"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
+	seatasql "seata.apache.org/seata-go/v2/pkg/datasource/sql"
 )
 
-// Mode 区分 RM 事务模式。
-type Mode int
+// dbSpec 描述一种数据库在 seata 中的 AT/XA 代理驱动名与 gorm dialector 构造方式。
+type dbSpec struct {
+	atDriver  string
+	xaDriver  string
+	dialector func(conn *sql.DB) gorm.Dialector
+}
 
-const (
-	// ModeAT AT 模式,依赖 undo_log 表。
-	ModeAT Mode = iota
-	// ModeXA XA 模式,要求数据库支持 XA 协议(MySQL 8+,PostgreSQL 需相应插件)。
-	ModeXA
-)
+// driver 按事务模式返回 seata 代理驱动名。
+func (s dbSpec) driver(mode Mode) string {
+	if mode == ModeXA {
+		return s.xaDriver
+	}
+	return s.atDriver
+}
 
-// OpenGorm 打开 seata 数据源并返回 gorm.DB。dialect 支持
-// mysql / postgres(或 postgresql、pgsql)。底层连接使用 seata 代理驱动,
-// 表结构元数据缓存、undo 日志等均由 SDK 处理。
-func OpenGorm(mode Mode, dialect, dsn string) (*gorm.DB, error) {
-	driverName, err := driverFor(mode, dialect)
+// dbSpecs 汇总每种数据库类型对应的驱动与 dialector,是驱动名与 dialector
+// 的单一数据源,避免两处 switch 重复。
+var dbSpecs = map[DBType]dbSpec{
+	DBTypeMySQL: {
+		atDriver:  seatasql.SeataATMySQLDriver,
+		xaDriver:  seatasql.SeataXAMySQLDriver,
+		dialector: func(conn *sql.DB) gorm.Dialector { return mysql.New(mysql.Config{Conn: conn}) },
+	},
+	DBTypePostgres: {
+		atDriver:  seatasql.SeataATPostgresDriver,
+		xaDriver:  seatasql.SeataXAPostgresDriver,
+		dialector: func(conn *sql.DB) gorm.Dialector { return postgres.New(postgres.Config{Conn: conn}) },
+	},
+}
+
+// dbSpecFor 按数据库类型查找 dbSpec,不支持的数据库类型返回 ERR_PARAM。
+func dbSpecFor(dbType DBType) (dbSpec, error) {
+	spec, ok := dbSpecs[dbType]
+	if !ok {
+		return dbSpec{}, newBizErr(errorx.ErrParam, fmt.Sprintf("不支持的数据库类型: %q", dbType))
+	}
+	return spec, nil
+}
+
+// WrapGorm 使用已打开的 seata 数据源连接创建 *gorm.DB,与官方示例
+// gorm.Open(mysql.New(mysql.Config{Conn: sqlDB}), &gorm.Config{}) 一致。
+// dbType 支持 DBTypeMySQL / DBTypePostgres,conn 应来自 OpenDataSource
+// (seata 代理驱动连接),表结构元数据缓存、undo 日志等均由 SDK 处理。
+func WrapGorm(dbType DBType, conn *sql.DB) (*gorm.DB, error) {
+	if conn == nil {
+		return nil, newBizErr(errorx.ErrParam, "数据源连接不能为空")
+	}
+	spec, err := dbSpecFor(dbType)
 	if err != nil {
 		return nil, err
 	}
-	conn, err := openSeataDB(driverName, dsn)
+	db, err := gorm.Open(spec.dialector(conn), &gorm.Config{})
 	if err != nil {
-		return nil, err
-	}
-	dialector, err := gormDialector(dialect, conn)
-	if err != nil {
-		_ = conn.Close()
-		return nil, err
-	}
-	db, err := gorm.Open(dialector, &gorm.Config{})
-	if err != nil {
-		_ = conn.Close()
-		return nil, errorx.E(CodeConfig, "初始化 seata gorm 失败", err)
+		return nil, newBizErr(CodeConfig, "初始化 seata gorm 失败", err)
 	}
 	return db, nil
 }
 
-// OpenATGorm 打开 AT 模式 gorm,等价于 OpenGorm(ModeAT, dialect, dsn)。
-func OpenATGorm(dialect, dsn string) (*gorm.DB, error) {
-	return OpenGorm(ModeAT, dialect, dsn)
+// OpenGorm 打开 seata 代理数据源并包装为 *gorm.DB,是 OpenDataSource +
+// WrapGorm 的组合便捷方法。
+func OpenGorm(mode Mode, dbType DBType, dsn string) (*gorm.DB, error) {
+	conn, err := OpenDataSource(mode, dbType, dsn)
+	if err != nil {
+		return nil, err
+	}
+	db, err := WrapGorm(dbType, conn)
+	if err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
+	return db, nil
 }
 
-// OpenXAGorm 打开 XA 模式 gorm,等价于 OpenGorm(ModeXA, dialect, dsn)。
-func OpenXAGorm(dialect, dsn string) (*gorm.DB, error) {
-	return OpenGorm(ModeXA, dialect, dsn)
+// DBOption 数据源注册选项。
+type DBOption func(*databaseOptions)
+
+type databaseOptions struct {
+	mode   Mode
+	dbType DBType
 }
 
-// driverFor 将方言与事务模式映射为 seata 代理驱动名。
-func driverFor(mode Mode, dialect string) (string, error) {
-	switch strings.ToLower(strings.TrimSpace(dialect)) {
-	case "mysql":
-		if mode == ModeXA {
-			return DriverXAMySQL, nil
-		}
-		return DriverATMySQL, nil
-	case "postgres", "postgresql", "pgsql":
-		if mode == ModeXA {
-			return DriverXAPostgres, nil
-		}
-		return DriverATPostgres, nil
-	default:
-		return "", errorx.E(errorx.ErrParam, fmt.Sprintf("不支持的数据方言: %q", dialect))
+// WithMode 设置事务模式,默认 ModeAT。
+func WithMode(mode Mode) DBOption {
+	return func(o *databaseOptions) {
+		o.mode = mode
 	}
 }
 
-func gormDialector(dialect string, conn *sql.DB) (gorm.Dialector, error) {
-	switch strings.ToLower(strings.TrimSpace(dialect)) {
-	case "mysql":
-		return mysql.New(mysql.Config{Conn: conn}), nil
-	case "postgres", "postgresql", "pgsql":
-		return postgres.New(postgres.Config{Conn: conn}), nil
-	default:
-		return nil, errorx.E(errorx.ErrParam, fmt.Sprintf("不支持的数据方言: %q", dialect))
+// WithDBType 设置数据库类型,默认 DBTypeMySQL。
+func WithDBType(dbType DBType) DBOption {
+	return func(o *databaseOptions) {
+		o.dbType = dbType
 	}
 }
 
 // AddDatabase 返回一个 ioc 扩展,把 seata 数据源注册为 *gorm.DB 单例,
-// 与 infra.AddDatabase 的注册约定一致。driver 可传:
-//   - seata 驱动名:seata-at-mysql / seata-at-postgres / seata-xa-mysql / seata-xa-postgres
-//   - 方言简写:mysql / postgres(等价于 AT 模式)
-func AddDatabase(dsn string, driver ...string) ioc.ServiceCollectionExtension {
+// 与 infra.AddDatabase 的注册约定一致。默认 AT 模式 + MySQL,可用
+// WithMode / WithDBType 调整。
+func AddDatabase(dsn string, opts ...DBOption) ioc.ServiceCollectionExtension {
 	return func(sc *ioc.ServiceCollection) *ioc.ServiceCollection {
 		sc.TryAddSingleton[*gorm.DB](func() (*gorm.DB, error) {
-			mode, dialect, err := parseSeataDriver(firstDriver(driver...))
-			if err != nil {
-				return nil, err
+			o := &databaseOptions{mode: ModeAT, dbType: DBTypeMySQL}
+			for _, opt := range opts {
+				opt(o)
 			}
-			return OpenGorm(mode, dialect, dsn)
+			return OpenGorm(o.mode, o.dbType, dsn)
 		})
 		return sc
-	}
-}
-
-func firstDriver(driver ...string) string {
-	if len(driver) > 1 {
-		return ""
-	}
-	if len(driver) == 1 {
-		return driver[0]
-	}
-	return "mysql"
-}
-
-func parseSeataDriver(name string) (Mode, string, error) {
-	switch strings.ToLower(strings.TrimSpace(name)) {
-	case DriverATMySQL, "mysql":
-		return ModeAT, "mysql", nil
-	case DriverATPostgres, "postgres", "postgresql", "pgsql":
-		return ModeAT, "postgres", nil
-	case DriverXAMySQL:
-		return ModeXA, "mysql", nil
-	case DriverXAPostgres:
-		return ModeXA, "postgres", nil
-	default:
-		return ModeAT, "", errorx.E(errorx.ErrParam, fmt.Sprintf("不支持的 seata 数据源驱动: %q", name))
 	}
 }

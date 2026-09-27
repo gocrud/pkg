@@ -68,7 +68,7 @@ func TestValidationHandlerWrapper_Invalid(t *testing.T) {
 		return nil
 	}
 	handler := ValidationHandlerWrapper()(next)
-	err := handler(context.Background(), &mockRequest{endpoint: "Test.Call", body: &validatable{err: errorx.E("USER_NOT_FOUND", "用户不存在")}}, nil)
+	err := handler(context.Background(), &mockRequest{endpoint: "Test.Call", body: &validatable{err: errorx.Define("USER_NOT_FOUND", "用户不存在")}}, nil)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -88,7 +88,7 @@ func TestValidationHandlerWrapper_Skip(t *testing.T) {
 		return nil
 	}
 	handler := ValidationHandlerWrapper("Test.Call")(next)
-	err := handler(context.Background(), &mockRequest{endpoint: "Test.Call", body: &validatable{err: errorx.E("USER_NOT_FOUND", "用户不存在")}}, nil)
+	err := handler(context.Background(), &mockRequest{endpoint: "Test.Call", body: &validatable{err: errorx.Define("USER_NOT_FOUND", "用户不存在")}}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -107,7 +107,7 @@ func TestErrorHandlerWrapper_Nil(t *testing.T) {
 
 func TestErrorHandlerWrapper_BizError(t *testing.T) {
 	next := func(ctx context.Context, req server.Request, rsp interface{}) error {
-		return errorx.E("USER_NOT_FOUND", "用户不存在")
+		return errorx.Define("USER_NOT_FOUND", "用户不存在")
 	}
 	handler := ErrorHandlerWrapper()(next)
 	err := handler(context.Background(), &mockRequest{endpoint: "Test.Call"}, nil)

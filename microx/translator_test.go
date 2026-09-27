@@ -46,7 +46,7 @@ func TestToMicroError_ValidationErrors(t *testing.T) {
 }
 
 func TestToMicroError_BizCustomCode(t *testing.T) {
-	merr := asMicroError(t, ToMicroError(errorx.E("USER_NOT_FOUND", "用户不存在")))
+	merr := asMicroError(t, ToMicroError(errorx.Define("USER_NOT_FOUND", "用户不存在")))
 	if merr.Code != HTTPBadRequest {
 		t.Fatalf("code = %d, want %d", merr.Code, HTTPBadRequest)
 	}
@@ -59,7 +59,7 @@ func TestToMicroError_BizCustomCode(t *testing.T) {
 }
 
 func TestToMicroError_BizUnauthorized(t *testing.T) {
-	merr := asMicroError(t, ToMicroError(errorx.E(errorx.ErrUnauthorized, "请先登录")))
+	merr := asMicroError(t, ToMicroError(errorx.Define(errorx.ErrUnauthorized, "请先登录")))
 	if merr.Code != HTTPUnauthorized {
 		t.Fatalf("code = %d, want %d", merr.Code, HTTPUnauthorized)
 	}
@@ -69,14 +69,14 @@ func TestToMicroError_BizUnauthorized(t *testing.T) {
 }
 
 func TestToMicroError_BizParam(t *testing.T) {
-	merr := asMicroError(t, ToMicroError(errorx.E(errorx.ErrParam, "参数错误")))
+	merr := asMicroError(t, ToMicroError(errorx.Define(errorx.ErrParam, "参数错误")))
 	if merr.Code != HTTPBadRequest || merr.Reason != errorx.ErrParam {
 		t.Fatalf("got code=%d reason=%q", merr.Code, merr.Reason)
 	}
 }
 
 func TestToMicroError_InternalMasked(t *testing.T) {
-	merr := asMicroError(t, ToMicroError(errorx.E(errorx.ErrInternal, "数据库连接失败")))
+	merr := asMicroError(t, ToMicroError(errorx.Define(errorx.ErrInternal, "数据库连接失败")))
 	if merr.Code != HTTPInternalError || merr.Reason != errorx.ErrInternal {
 		t.Fatalf("got code=%d reason=%q", merr.Code, merr.Reason)
 	}
@@ -105,12 +105,12 @@ func TestFromMicroError_Reason(t *testing.T) {
 	if !ok {
 		t.Fatal("expected restored")
 	}
-	biz, isBiz := err.(errorx.BizError)
+	biz, isBiz := errorx.ErrorOf(err)
 	if !isBiz {
-		t.Fatalf("expected errorx.BizError, got %T", err)
+		t.Fatalf("expected errorx error, got %T", err)
 	}
-	if biz.CodeStr() != "USER_NOT_FOUND" || biz.MsgStr() != "用户不存在" {
-		t.Fatalf("got code=%q msg=%q", biz.CodeStr(), biz.MsgStr())
+	if biz.CodeStr() != "USER_NOT_FOUND" || biz.Msg() != "用户不存在" {
+		t.Fatalf("got code=%q msg=%q", biz.CodeStr(), biz.Msg())
 	}
 }
 
@@ -129,7 +129,7 @@ func TestFromMicroError_CodeFallback(t *testing.T) {
 		if !ok {
 			t.Fatalf("code=%d: expected restored", c.code)
 		}
-		biz, isBiz := err.(errorx.BizError)
+		biz, isBiz := errorx.ErrorOf(err)
 		if !isBiz || biz.CodeStr() != c.want {
 			t.Fatalf("code=%d: got %T %v, want reason %q", c.code, err, err, c.want)
 		}

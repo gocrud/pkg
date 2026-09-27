@@ -1,8 +1,6 @@
 package seatax
 
 import (
-	"context"
-
 	"google.golang.org/grpc"
 	seataGrpc "seata.apache.org/seata-go/v2/pkg/integration/grpc"
 )
@@ -32,14 +30,3 @@ func ClientTransactionInterceptor() grpc.UnaryClientInterceptor {
 func ClientTransactionStreamInterceptor() grpc.StreamClientInterceptor {
 	return seataGrpc.ClientTransactionStreamInterceptor
 }
-
-// InjectXIDContext 手动向 gRPC outgoing context 注入当前 XID(通常不需要,
-// 客户端拦截器已处理;用于自定义元数据处理场景)。
-func InjectXIDContext(ctx context.Context) context.Context {
-	if xid := GetXID(ctx); xid != "" {
-		return context.WithValue(ctx, grpcXIDContextKey{}, xid)
-	}
-	return ctx
-}
-
-type grpcXIDContextKey struct{}

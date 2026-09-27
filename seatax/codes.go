@@ -1,7 +1,7 @@
 package seatax
 
 // seatax 业务错误码。所有由 seata SDK / TC 交互产生的错误,都会转换为携带
-// 下列错误码的 errorx.BizError,业务端可沿用 errorx / grpcx / httpx / microx
+// 下列错误码的 errorx 业务错误,业务端可沿用 errorx / grpcx / ginx / microx
 // 的统一错误处理链路。
 const (
 	// CodeBegin 全局事务开启失败(TC 不可达、超时等)。

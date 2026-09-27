@@ -44,22 +44,22 @@ func (undoLogPostgres) TableName() string { return "undo_log" }
 // undo_log 表(含唯一索引 ux_undo_log)。建议传入指向业务库的普通 *gorm.DB,
 // 而非 seata 代理连接;重复调用幂等(AutoMigrate 只补缺失的列/索引)。
 func InitUndoLogMySQL(db *gorm.DB) error {
-	return initUndoLog(db, "MySQL", &undoLogMySQL{})
+	return initUndoLog(db, DBTypeMySQL, &undoLogMySQL{})
 }
 
 // InitUndoLogPostgres 使用 gorm 结构体建表方式初始化 AT 模式所需的 PostgreSQL
 // undo_log 表(含唯一索引 ux_undo_log)。建议传入指向业务库的普通 *gorm.DB,
 // 而非 seata 代理连接;重复调用幂等(AutoMigrate 只补缺失的列/索引)。
 func InitUndoLogPostgres(db *gorm.DB) error {
-	return initUndoLog(db, "PostgreSQL", &undoLogPostgres{})
+	return initUndoLog(db, DBTypePostgres, &undoLogPostgres{})
 }
 
-func initUndoLog(db *gorm.DB, dialect string, model any) error {
+func initUndoLog(db *gorm.DB, dbType DBType, model any) error {
 	if db == nil {
-		return errorx.E(errorx.ErrParam, "gorm.DB 不能为空")
+		return newBizErr(errorx.ErrParam, "gorm.DB 不能为空")
 	}
 	if err := db.AutoMigrate(model); err != nil {
-		return errorx.E(CodeConfig, fmt.Sprintf("初始化 %s undo_log 表失败", dialect), err)
+		return newBizErr(CodeConfig, fmt.Sprintf("初始化 %s undo_log 表失败", dbType), err)
 	}
 	return nil
 }

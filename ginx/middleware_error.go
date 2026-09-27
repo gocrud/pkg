@@ -1,4 +1,4 @@
-package httpx
+package ginx
 
 import (
 	"errors"
@@ -9,16 +9,6 @@ import (
 	"github.com/gocrud/veri"
 	"github.com/rs/zerolog"
 )
-
-type stackTracer interface {
-	CodeStr() string
-	MsgStr() string
-	StackStr() string
-}
-
-type unwrappable interface {
-	Unwrap() error
-}
 
 type FieldErrorDetail struct {
 	Field   string `json:"field"`
@@ -51,22 +41,18 @@ func AutoErrorInterceptor(logger zerolog.Logger) gin.HandlerFunc {
 			})
 			return
 		}
-		if tracer, ok := lastErr.(stackTracer); ok {
-			code := tracer.CodeStr()
+		if e, ok := errorx.ErrorOf(lastErr); ok {
+			code := e.CodeStr()
 			if code == errorx.ErrInternal {
-				var realCause error
-				if unwrapper, canUnwrap := lastErr.(unwrappable); canUnwrap {
-					realCause = unwrapper.Unwrap()
-				}
-				logger.Error().Err(realCause).
-					Str("caller", tracer.StackStr()).Str("biz_code", code).
+				logger.Error().Err(e.Unwrap()).
+					Str("caller", e.StackStr()).Str("biz_code", code).
 					Msg("internal server error")
 				ctx.AbortWithStatusJSON(http.StatusInternalServerError, Result{
 					Code: code, Msg: "系统繁忙，请稍后再试",
 				})
 				return
 			}
-			ctx.AbortWithStatusJSON(http.StatusOK, Result{Code: code, Msg: tracer.MsgStr()})
+			ctx.AbortWithStatusJSON(http.StatusOK, Result{Code: code, Msg: e.Msg()})
 			return
 		}
 		logger.Error().Err(lastErr).Msg("unhandled error intercepted")

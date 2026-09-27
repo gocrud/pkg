@@ -2,6 +2,7 @@ package seatax
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -17,6 +18,7 @@ import (
 	"google.golang.org/grpc"
 	grpcMetadata "google.golang.org/grpc/metadata"
 	"seata.apache.org/seata-go/v2/pkg/constant"
+	seatasql "seata.apache.org/seata-go/v2/pkg/datasource/sql"
 	"seata.apache.org/seata-go/v2/pkg/tm"
 )
 
@@ -76,9 +78,9 @@ func TestMain(m *testing.M) {
 
 func bizCode(t *testing.T, err error) string {
 	t.Helper()
-	var be errorx.BizError
-	if !errors.As(err, &be) {
-		t.Fatalf("期望 BizError,实际: %v", err)
+	be, ok := errorx.ErrorOf(err)
+	if !ok {
+		t.Fatalf("期望 errorx 业务错误,实际: %v", err)
 	}
 	return be.CodeStr()
 }
@@ -103,7 +105,7 @@ func TestWithGlobalTxCommit(t *testing.T) {
 
 func TestWithGlobalTxRollbackOnBizError(t *testing.T) {
 	globalMock.reset()
-	biz := errorx.E("BIZ_FAIL", "业务失败")
+	biz := newBizErr("BIZ_FAIL", "业务失败")
 	err := WithGlobalTx(context.Background(), "tx-rollback", func(ctx context.Context) error {
 		return biz
 	})
@@ -167,10 +169,43 @@ func TestWithGlobalTxRollbackFailureKeepsBizError(t *testing.T) {
 	globalMock.reset()
 	globalMock.rollbackErr = errors.New("rollback timeout")
 	err := WithGlobalTx(context.Background(), "tx-rb-fail", func(ctx context.Context) error {
-		return errorx.E("BIZ_FAIL", "业务失败")
+		return newBizErr("BIZ_FAIL", "业务失败")
 	})
 	if bizCode(t, err) != "BIZ_FAIL" {
 		t.Fatalf("回滚失败时也应保留业务错误码,实际: %v", err)
+	}
+}
+
+func TestComposeTxResult(t *testing.T) {
+	biz := newBizErr("BIZ_FAIL", "业务失败")
+	panicText := "boom" // 非 error panic 值
+	phaseErr := errors.New("phase error")
+
+	cases := []struct {
+		name     string
+		bizErr   error
+		panicVal any
+		phaseErr error
+		wantCode string // 为空表示期望 nil
+	}{
+		{"提交失败", nil, nil, phaseErr, CodeCommit},
+		{"回滚失败保留业务码", biz, nil, phaseErr, "BIZ_FAIL"},
+		{"回滚失败且 panic", nil, panicText, phaseErr, CodeInternal},
+		{"panic 回滚成功", nil, panicText, nil, errorx.ErrInternal},
+		{"业务错误透传", biz, nil, nil, "BIZ_FAIL"},
+		{"全部成功", nil, nil, nil, ""},
+	}
+	for _, c := range cases {
+		got := composeTxResult(c.bizErr, c.panicVal, c.phaseErr)
+		if c.wantCode == "" {
+			if got != nil {
+				t.Errorf("%s: 期望 nil,实际 %v", c.name, got)
+			}
+			continue
+		}
+		if bizCode(t, got) != c.wantCode {
+			t.Errorf("%s: 期望 %s,实际 %v", c.name, c.wantCode, got)
+		}
 	}
 }
 
@@ -180,7 +215,7 @@ func TestWithGlobalTxPropagationNotSupported(t *testing.T) {
 	err := WithGlobalTx(context.Background(), "tx-unsupported", func(ctx context.Context) error {
 		called = true
 		return nil
-	}, WithPropagation(tm.NotSupported))
+	}, WithPropagation(PropagationNotSupported))
 	if err != nil {
 		t.Fatalf("NotSupported 传播下应直接执行,实际错误: %v", err)
 	}
@@ -214,46 +249,71 @@ func TestInitFromConfEmpty(t *testing.T) {
 // ---- RM 数据源 ----
 
 func TestOpenSeataDBEmptyDSN(t *testing.T) {
-	if _, err := OpenATMySQL(""); bizCode(t, err) != errorx.ErrParam {
+	if _, err := OpenDataSource(ModeAT, DBTypeMySQL, ""); bizCode(t, err) != errorx.ErrParam {
 		t.Fatalf("空 DSN 应返回参数错误,实际: %v", err)
 	}
-	if _, err := OpenXAPostgres(""); bizCode(t, err) != errorx.ErrParam {
+	if _, err := OpenDataSource(ModeXA, DBTypePostgres, ""); bizCode(t, err) != errorx.ErrParam {
 		t.Fatalf("空 DSN 应返回参数错误,实际: %v", err)
 	}
 }
 
-func TestDriverFor(t *testing.T) {
+func TestOpenGormNilConn(t *testing.T) {
+	if _, err := WrapGorm(DBTypeMySQL, nil); bizCode(t, err) != errorx.ErrParam {
+		t.Fatalf("nil 连接应返回参数错误,实际: %v", err)
+	}
+}
+
+func TestOpenGormUnsupportedDBType(t *testing.T) {
+	conn, err := sql.Open("mysql", "user:pass@tcp(127.0.0.1:3306)/db")
+	if err != nil {
+		t.Fatalf("构造测试连接失败: %v", err)
+	}
+	defer conn.Close()
+	if _, err := WrapGorm(DBType("oracle"), conn); err == nil {
+		t.Fatal("WrapGorm 不支持的数据库类型应返回错误")
+	}
+}
+
+func TestDBSpec(t *testing.T) {
 	cases := []struct {
-		mode    Mode
-		dialect string
-		want    string
+		mode   Mode
+		dbType DBType
+		want   string
 	}{
-		{ModeAT, "mysql", DriverATMySQL},
-		{ModeXA, "MySQL", DriverXAMySQL},
-		{ModeAT, "postgres", DriverATPostgres},
-		{ModeXA, "PostgreSQL", DriverXAPostgres},
-		{ModeAT, "pgsql", DriverATPostgres},
+		{ModeAT, DBTypeMySQL, seatasql.SeataATMySQLDriver},
+		{ModeXA, DBTypeMySQL, seatasql.SeataXAMySQLDriver},
+		{ModeAT, DBTypePostgres, seatasql.SeataATPostgresDriver},
+		{ModeXA, DBTypePostgres, seatasql.SeataXAPostgresDriver},
 	}
 	for _, c := range cases {
-		got, err := driverFor(c.mode, c.dialect)
-		if err != nil || got != c.want {
-			t.Errorf("driverFor(%v,%q) = %q,%v, 期望 %q", c.mode, c.dialect, got, err, c.want)
+		spec, err := dbSpecFor(c.dbType)
+		if err != nil {
+			t.Errorf("dbSpecFor(%q) 意外错误: %v", c.dbType, err)
+			continue
+		}
+		if got := spec.driver(c.mode); got != c.want {
+			t.Errorf("dbSpec(%q).driver(%v) = %q, 期望 %q", c.dbType, c.mode, got, c.want)
 		}
 	}
-	if _, err := driverFor(ModeAT, "oracle"); err == nil {
-		t.Fatal("不支持的方言应返回错误")
+	if _, err := dbSpecFor(DBType("oracle")); err == nil {
+		t.Fatal("不支持的数据库类型应返回错误")
 	}
-	if _, err := OpenGorm(ModeAT, "oracle", "dsn"); err == nil {
-		t.Fatal("OpenGorm 不支持的方言应返回错误")
+	for _, s := range []string{"MySQL", "PostgreSQL", "pgsql"} {
+		if _, err := dbSpecFor(DBType(s)); err == nil {
+			t.Errorf("大小写变体/别名 %q 应返回错误(严格匹配)", s)
+		}
+	}
+	if _, err := OpenGorm(ModeAT, DBType("oracle"), "dsn"); err == nil {
+		t.Fatal("OpenGorm 不支持的数据库类型应返回错误")
 	}
 }
 
-func TestParseSeataDriver(t *testing.T) {
-	if mode, dialect, err := parseSeataDriver(DriverXAMySQL); err != nil || mode != ModeXA || dialect != "mysql" {
-		t.Errorf("parseSeataDriver(%s) 解析错误: %v %v %q", DriverXAMySQL, mode, err, dialect)
-	}
-	if _, _, err := parseSeataDriver("no-such-driver"); err == nil {
-		t.Fatal("未知驱动名应返回错误")
+func TestDatabaseOptions(t *testing.T) {
+	o := &databaseOptions{mode: ModeAT, dbType: DBTypeMySQL}
+	WithMode(ModeXA)(o)
+	WithDBType(DBTypePostgres)(o)
+	if o.mode != ModeXA || o.dbType != DBTypePostgres {
+		t.Errorf("数据库选项未生效: mode=%v dbType=%v", o.mode, o.dbType)
 	}
 }
 
@@ -323,7 +383,7 @@ func TestGinMiddlewareStrictMissingXID(t *testing.T) {
 	if handlerRan {
 		t.Fatal("默认严格模式缺 XID 时 handler 不应执行")
 	}
-	// c.Error + Abort 后由 httpx.AutoErrorInterceptor 统一渲染响应,这里只校验已中止。
+	// c.Error + Abort 后由 ginx.AutoErrorInterceptor 统一渲染响应,这里只校验已中止。
 	if w.Code == http.StatusOK && w.Body.Len() == 0 {
 		t.Log("默认严格模式已中止,响应渲染由业务层错误中间件完成")
 	}
@@ -413,10 +473,10 @@ func TestMicroServerWrapperNoXID(t *testing.T) {
 	}
 }
 
-func TestWithXIDContext(t *testing.T) {
+func TestWithXIDMetadata(t *testing.T) {
 	ctx := tm.InitSeataContext(context.Background())
 	tm.SetXID(ctx, "xid-micro")
-	out := WithXIDContext(ctx)
+	out := WithXIDMetadata(ctx)
 	md, ok := metadata.FromContext(out)
 	if !ok {
 		t.Fatal("应写入 outgoing metadata")
@@ -425,7 +485,7 @@ func TestWithXIDContext(t *testing.T) {
 		t.Fatalf("metadata 应携带 XID,实际: %q", md[constant.XidKey])
 	}
 	// 无 XID 时原样返回
-	if out2 := WithXIDContext(context.Background()); out2 != context.Background() {
+	if out2 := WithXIDMetadata(context.Background()); out2 != context.Background() {
 		t.Error("无 XID 时应原样返回 context")
 	}
 }

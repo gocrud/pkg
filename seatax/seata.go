@@ -1,14 +1,9 @@
-// Package seatax 封装 seata.apache.org/seata-go/v2,同时提供 TM(全局事务)与
-// RM(AT/XA 数据源、TCC)能力,并针对 gRPC、HTTP(gin)、go-micro 三种协议提供
-// XID 传播组件。所有 seata 内部错误统一转换为 errorx.BizError(SEATA_* 错误码),
-// 业务错误原样透传,与 grpcx / httpx(ginx) / microx 的统一错误处理链路兼容。
 package seatax
 
 import (
 	"os"
 	"sync/atomic"
 
-	"github.com/gocrud/pkg/errorx"
 	"seata.apache.org/seata-go/v2/pkg/client"
 )
 
@@ -25,7 +20,7 @@ func Init(path string) (err error) {
 	}
 	defer func() {
 		if r := recover(); r != nil {
-			err = errorx.E(CodeConfig, "初始化 Seata 客户端失败", toError(r))
+			err = newBizErr(CodeConfig, "初始化 Seata 客户端失败", toError(r))
 		}
 	}()
 	client.InitPath(path)
@@ -37,11 +32,11 @@ func Init(path string) (err error) {
 // 内容内嵌进业务应用。配置会先写入临时文件再交给 SDK 加载,初始化完成后删除。
 func InitFromConf(conf []byte) (err error) {
 	if len(conf) == 0 {
-		return errorx.E(CodeConfig, "Seata 配置内容为空")
+		return newBizErr(CodeConfig, "Seata 配置内容为空")
 	}
 	file, err := os.CreateTemp("", "seatax-conf-*.yaml")
 	if err != nil {
-		return errorx.E(CodeConfig, "写入 Seata 临时配置失败", err)
+		return newBizErr(CodeConfig, "写入 Seata 临时配置失败", err)
 	}
 	cleanup := func() {
 		_ = file.Close()
@@ -49,10 +44,10 @@ func InitFromConf(conf []byte) (err error) {
 	}
 	defer cleanup()
 	if _, err = file.Write(conf); err != nil {
-		return errorx.E(CodeConfig, "写入 Seata 临时配置失败", err)
+		return newBizErr(CodeConfig, "写入 Seata 临时配置失败", err)
 	}
 	if err = file.Close(); err != nil {
-		return errorx.E(CodeConfig, "写入 Seata 临时配置失败", err)
+		return newBizErr(CodeConfig, "写入 Seata 临时配置失败", err)
 	}
 	return Init(file.Name())
 }

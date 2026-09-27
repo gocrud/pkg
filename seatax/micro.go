@@ -7,8 +7,7 @@ import (
 	"go-micro.dev/v6/metadata"
 	"go-micro.dev/v6/server"
 
-	"seata.apache.org/seata-go/v2/pkg/constant"
-	"seata.apache.org/seata-go/v2/pkg/tm"
+	seataConstant "seata.apache.org/seata-go/v2/pkg/constant"
 )
 
 // microClientWrapper 在发起 RPC 前把当前 seata 上下文中的 XID 写入 outgoing
@@ -18,19 +17,19 @@ type microClientWrapper struct {
 }
 
 func (w *microClientWrapper) Call(ctx context.Context, req client.Request, rsp interface{}, opts ...client.CallOption) error {
-	return w.Client.Call(WithXIDContext(ctx), req, rsp, opts...)
+	return w.Client.Call(WithXIDMetadata(ctx), req, rsp, opts...)
 }
 
 func (w *microClientWrapper) Stream(ctx context.Context, req client.Request, opts ...client.CallOption) (client.Stream, error) {
-	return w.Client.Stream(WithXIDContext(ctx), req, opts...)
+	return w.Client.Stream(WithXIDMetadata(ctx), req, opts...)
 }
 
 func (w *microClientWrapper) Publish(ctx context.Context, msg client.Message, opts ...client.PublishOption) error {
-	return w.Client.Publish(WithXIDContext(ctx), msg, opts...)
+	return w.Client.Publish(WithXIDMetadata(ctx), msg, opts...)
 }
 
 // MicroClientTransactionWrapper go-micro 客户端包装器:注入 XID 到 outgoing
-// metadata。所有客户端调用统一走 WithXIDContext,业务侧无需感知。
+// metadata。所有客户端调用统一走 WithXIDMetadata,业务侧无需感知。
 func MicroClientTransactionWrapper() client.Wrapper {
 	return func(c client.Client) client.Client {
 		return &microClientWrapper{Client: c}
@@ -46,28 +45,25 @@ func MicroServerTransactionWrapper() server.HandlerWrapper {
 			if !ok {
 				return fn(ctx, req, rsp)
 			}
-			xid := md[constant.XidKey]
-			if xid == "" {
-				xid = md[constant.XidKeyLowercase]
-			}
+			xid := firstXID(md[seataConstant.XidKey], md[seataConstant.XidKeyLowercase])
 			if xid != "" {
-				ctx = tm.InitSeataContext(ctx)
-				tm.SetXID(ctx, xid)
+				ctx = InitSeataContext(ctx)
+				SetXID(ctx, xid)
 			}
 			return fn(ctx, req, rsp)
 		}
 	}
 }
 
-// WithXIDContext 把当前 seata 上下文中的 XID 写入 go-micro outgoing metadata,
+// WithXIDMetadata 把当前 seata 上下文中的 XID 写入 go-micro outgoing metadata,
 // 返回新 context。无 XID 时原样返回。
-func WithXIDContext(ctx context.Context) context.Context {
-	if !tm.IsSeataContext(ctx) {
+func WithXIDMetadata(ctx context.Context) context.Context {
+	if !IsSeataContext(ctx) {
 		return ctx
 	}
-	xid := tm.GetXID(ctx)
+	xid := GetXID(ctx)
 	if xid == "" {
 		return ctx
 	}
-	return metadata.Set(ctx, constant.XidKey, xid)
+	return metadata.Set(ctx, seataConstant.XidKey, xid)
 }

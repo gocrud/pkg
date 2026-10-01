@@ -37,8 +37,8 @@ func TestToMicroError_ValidationErrors(t *testing.T) {
 	if merr.Code != HTTPBadRequest {
 		t.Fatalf("code = %d, want %d", merr.Code, HTTPBadRequest)
 	}
-	if merr.Reason != errorx.ErrParam {
-		t.Fatalf("reason = %q, want %q", merr.Reason, errorx.ErrParam)
+	if merr.Reason != ErrParam {
+		t.Fatalf("reason = %q, want %q", merr.Reason, ErrParam)
 	}
 	if !strings.Contains(merr.Detail, "name:用户名不能为空") || !strings.Contains(merr.Detail, "age:年龄必须大于 0") {
 		t.Fatalf("detail = %q, missing field errors", merr.Detail)
@@ -59,25 +59,25 @@ func TestToMicroError_BizCustomCode(t *testing.T) {
 }
 
 func TestToMicroError_BizUnauthorized(t *testing.T) {
-	merr := asMicroError(t, ToMicroError(errorx.Define(errorx.ErrUnauthorized, "请先登录")))
+	merr := asMicroError(t, ToMicroError(errorx.Define(ErrUnauthorized, "请先登录")))
 	if merr.Code != HTTPUnauthorized {
 		t.Fatalf("code = %d, want %d", merr.Code, HTTPUnauthorized)
 	}
-	if merr.Reason != errorx.ErrUnauthorized {
-		t.Fatalf("reason = %q, want %q", merr.Reason, errorx.ErrUnauthorized)
+	if merr.Reason != ErrUnauthorized {
+		t.Fatalf("reason = %q, want %q", merr.Reason, ErrUnauthorized)
 	}
 }
 
 func TestToMicroError_BizParam(t *testing.T) {
-	merr := asMicroError(t, ToMicroError(errorx.Define(errorx.ErrParam, "参数错误")))
-	if merr.Code != HTTPBadRequest || merr.Reason != errorx.ErrParam {
+	merr := asMicroError(t, ToMicroError(errorx.Define(ErrParam, "参数错误")))
+	if merr.Code != HTTPBadRequest || merr.Reason != ErrParam {
 		t.Fatalf("got code=%d reason=%q", merr.Code, merr.Reason)
 	}
 }
 
 func TestToMicroError_InternalMasked(t *testing.T) {
-	merr := asMicroError(t, ToMicroError(errorx.Define(errorx.ErrInternal, "数据库连接失败")))
-	if merr.Code != HTTPInternalError || merr.Reason != errorx.ErrInternal {
+	merr := asMicroError(t, ToMicroError(errorx.Define(ErrInternal, "数据库连接失败")))
+	if merr.Code != HTTPInternalError || merr.Reason != ErrInternal {
 		t.Fatalf("got code=%d reason=%q", merr.Code, merr.Reason)
 	}
 	if merr.Detail != "系统繁忙，请稍后再试" {
@@ -87,7 +87,7 @@ func TestToMicroError_InternalMasked(t *testing.T) {
 
 func TestToMicroError_Unknown(t *testing.T) {
 	merr := asMicroError(t, ToMicroError(errors.New("boom")))
-	if merr.Code != HTTPInternalError || merr.Reason != errorx.ErrInternal {
+	if merr.Code != HTTPInternalError || merr.Reason != ErrInternal {
 		t.Fatalf("got code=%d reason=%q", merr.Code, merr.Reason)
 	}
 }
@@ -119,9 +119,9 @@ func TestFromMicroError_CodeFallback(t *testing.T) {
 		code int32
 		want string
 	}{
-		{HTTPBadRequest, errorx.ErrParam},
-		{HTTPUnauthorized, errorx.ErrUnauthorized},
-		{HTTPInternalError, errorx.ErrInternal},
+		{HTTPBadRequest, ErrParam},
+		{HTTPUnauthorized, ErrUnauthorized},
+		{HTTPInternalError, ErrInternal},
 	}
 	for _, c := range cases {
 		remote := &microerrors.Error{Id: "svc", Code: c.code, Detail: "d"}

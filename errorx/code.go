@@ -81,16 +81,3 @@ func canonical[T CodeValue](code T) string {
 		return fmt.Sprint(any(code))
 	}
 }
-
-// 协议层通用错误码。与具体业务无关,供 ginx / grpcx / microx 等出口层
-// 统一归类;业务自定义错误码请使用 Define。
-const (
-	// ErrOK 成功。
-	ErrOK = "SUCCESS"
-	// ErrInternal 内部错误。出口层据此隐藏细节,仅返回兑底提示。
-	ErrInternal = "ERR_SYS"
-	// ErrParam 参数错误。
-	ErrParam = "ERR_PARAM"
-	// ErrUnauthorized 未认证或凭证失效。
-	ErrUnauthorized = "ERR_UNAUTH"
-)

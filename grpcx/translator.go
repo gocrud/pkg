@@ -34,19 +34,19 @@ func ToGRPCError(ctx context.Context, err error) error {
 			detailBuilder.WriteString(fmt.Sprintf("%s:%s", fieldErr.Field, fieldErr.Message))
 		}
 		trailer := metadata.Pairs(
-			HeaderBizCode, errorx.ErrParam,
+			HeaderBizCode, ErrParam,
 			HeaderBizReason, "请求参数校验失败",
 			HeaderBizDetail, detailBuilder.String(),
 		)
 		_ = grpc.SetTrailer(ctx, trailer)
 		return status.Error(codes.InvalidArgument, "参数校验失败")
 	}
-	if biz, ok := errorx.ErrorOf(err); ok && biz.CodeStr() != errorx.ErrInternal {
+	if biz, ok := errorx.ErrorOf(err); ok && biz.CodeStr() != ErrInternal {
 		trailer := metadata.Pairs(HeaderBizCode, biz.CodeStr(), HeaderBizReason, biz.Msg())
 		_ = grpc.SetTrailer(ctx, trailer)
 		return status.Error(codes.Aborted, biz.Msg())
 	}
-	trailer := metadata.Pairs(HeaderBizCode, errorx.ErrInternal, HeaderBizReason, "系统繁忙，请稍后再试")
+	trailer := metadata.Pairs(HeaderBizCode, ErrInternal, HeaderBizReason, "系统繁忙，请稍后再试")
 	_ = grpc.SetTrailer(ctx, trailer)
 	return status.Error(codes.Internal, "系统内部错误")
 }

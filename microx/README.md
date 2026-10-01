@@ -44,6 +44,8 @@ func NewService() micro.Service {
 
 字段详情采用 `field:message; field:message` 拼入 `Detail`。内部错误不向客户端暴露原因，统一返回“系统繁忙，请稍后再试”。
 
+协议层错误码定义在本包：`microx.ErrParam`（`ERR_PARAM`）、`microx.ErrUnauthorized`（`ERR_UNAUTH`）、`microx.ErrInternal`（`ERR_SYS`），写入结构化错误的 `Reason`；`errorx` 只提供 `Define` 与消息渲染。
+
 ## 客户端还原
 
 `FromMicroError(err)` 返回 `(converted bool, err error)`：用 `errors.As` 提取 `*errors.Error`，`Reason` 非空时还原为 `errorx.Define(reason, detail)`；`Reason` 为空时按 `Code` 兜底(400→`ERR_PARAM`、401→`ERR_UNAUTH`、500→`ERR_SYS`)，其余原样返回，nil 返回 `(false, nil)`。

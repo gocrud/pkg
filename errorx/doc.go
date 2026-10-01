@@ -20,8 +20,8 @@
 //   - 定义:Define(code, msg),code 支持字符串与常见整数。
 //   - 链式:Str / Int / Int64 / Any 设置命名参数,Wrap 附加 cause,Stack 捕获堆栈。
 //   - 判定:errors.Is(err, ErrX)、CodeOf(err)、ErrorOf(err)(均沿 Unwrap 链查找)。
-//   - 协议层通用码:ErrOK(SUCCESS)、ErrParam(ERR_PARAM)、ErrUnauthorized(ERR_UNAUTH)、
-//     ErrInternal(ERR_SYS)。
+//   - 本包不内置具体协议码;协议层错误码由各出口包(ginx / grpcx / microx)自行定义,
+//     业务码用 Define 声明。
 //
 // %v 渲染 "[CODE] 消息",%+v 追加箭头树堆栈与 caused by 链。详见本包 README。
 package errorx

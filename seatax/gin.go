@@ -1,67 +1,18 @@
 package seatax
 
 import (
-	"net/http"
-
 	"github.com/gin-gonic/gin"
-	seataConstant "seata.apache.org/seata-go/v2/pkg/constant"
+
+	ginintegration "seata.apache.org/seata-go/v2/pkg/integration/gin"
 )
 
-// GinTransactionMiddleware HTTP(gin)事务中间件:从请求头(TX_XID / tx_xid)
-// 恢复 XID 并初始化 seata 上下文,使 handler 内的分支事务获得 XID 环境。
+// GinTransactionMiddleware 返回 gin 全局事务中间件。
 //
-// 默认严格模式:请求未携带 XID 时以 SEATA_XID_MISSING 业务错误中止
-// (c.Error + c.Abort),由 ginx 的 AutoErrorInterceptor 统一渲染为 HTTP 200
-// 的 Result 结构。确需放行无 XID 请求时,使用 WithAllowMissingXID()
-// 宽松模式按普通请求处理:
+// 它从 HTTP 请求头读取全局事务 XID(TX_XID,兼容小写 tx_xid),写入请求上下文,
+// 使下游业务代码(AT/TCC/XA 分支注册、sql 拦截等)能感知当前全局事务;
+// 缺少 XID 时以 400 中断请求。
 //
-//	seatax.GinTransactionMiddleware()
-//	seatax.GinTransactionMiddleware(seatax.WithAllowMissingXID())
-//
-// 注意:gin >= 1.8.1 时如需通过 c.Value() 读取 seata 上下文,须将引擎的
-// ContextWithFallback 置为 true(seata-go 官方要求)。
-func GinTransactionMiddleware(opts ...GinOption) gin.HandlerFunc {
-	o := &ginMiddlewareOptions{}
-	for _, opt := range opts {
-		opt(o)
-	}
-	return func(c *gin.Context) {
-		xid := firstXID(c.GetHeader(seataConstant.XidKey), c.GetHeader(seataConstant.XidKeyLowercase))
-		if xid == "" {
-			if !o.allowMissingXID {
-				err := newBizErr(CodeXIDMissing, "缺少全局事务 XID")
-				_ = c.Error(err)
-				c.Abort()
-				return
-			}
-		} else {
-			newCtx := InitSeataContext(c.Request.Context())
-			SetXID(newCtx, xid)
-			c.Request = c.Request.WithContext(newCtx)
-		}
-		c.Next()
-	}
+// 注意:使用 gin >= 1.8.1 时,需将 engine.ContextWithFallback 置为 true。
+func GinTransactionMiddleware() gin.HandlerFunc {
+	return ginintegration.TransactionMiddleware()
 }
-
-type ginMiddlewareOptions struct {
-	allowMissingXID bool
-}
-
-// GinOption gin 事务中间件选项。
-type GinOption func(*ginMiddlewareOptions)
-
-// WithAllowMissingXID 开启宽松模式:请求未携带 XID 时按普通请求放行。
-func WithAllowMissingXID() GinOption {
-	return func(o *ginMiddlewareOptions) {
-		o.allowMissingXID = true
-	}
-}
-
-// InjectXIDHeader 手动向 http.Request 注入 XID 头(官方约定头名 XIDHeaderKey),
-// 用于在全局事务内发起 HTTP 调用(通常不需要,SDK 中间件在服务端自动恢复)。
-func InjectXIDHeader(req *http.Request, xid string) {
-	req.Header.Set(XIDHeaderKey, xid)
-}
-
-// XIDHeaderKey 官方 gin 中间件约定的 XID 请求头名称(constant.XidKey)。
-const XIDHeaderKey = seataConstant.XidKey

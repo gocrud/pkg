@@ -45,7 +45,9 @@ func NewServer() *grpc.Server {
 
 Trailer 键为 `HeaderBizCode` (`x-biz-code`)、`HeaderBizReason` (`x-biz-reason`)、`HeaderBizDetail` (`x-biz-detail`)。字段详情采用 `field:message; field:message` 文本，不是 JSON。
 
-注意：手工创建 `errorx.Define(errorx.ErrParam, ...)` 属于普通业务错误，在 gRPC 中映射为 `Aborted`；只有 `*veri.ValidationErrors` 分支映射为 `InvalidArgument`。已有 gRPC status 错误若不满足业务错误条件，也会被转换为 `Internal`，不会原样透传。`ToGRPCError` 不记录日志，应由服务端自行记录内部原因。
+注意：手工创建 `errorx.Define(grpcx.ErrParam, ...)` 属于普通业务错误，在 gRPC 中映射为 `Aborted`；只有 `*veri.ValidationErrors` 分支映射为 `InvalidArgument`。已有 gRPC status 错误若不满足业务错误条件，也会被转换为 `Internal`，不会原样透传。`ToGRPCError` 不记录日志，应由服务端自行记录内部原因。
+
+协议层错误码定义在本包：`grpcx.ErrParam`（`ERR_PARAM`）、`grpcx.ErrInternal`（`ERR_SYS`），作为 `x-biz-code` trailer 的取值；`errorx` 只提供 `Define` 与消息渲染。
 
 ## 客户端还原
 

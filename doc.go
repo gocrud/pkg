@@ -8,9 +8,8 @@
 //	github.com/gocrud/pkg/ginx    Gin 统一响应与错误中间件:Ok、Fail、FailParam、AutoErrorInterceptor
 //	github.com/gocrud/pkg/grpcx   gRPC 校验与错误转换:UnaryServerValidationInterceptor、ToGRPCError、FromGRPCError
 //	github.com/gocrud/pkg/microx  go-micro v6 校验与错误转换:ValidationHandlerWrapper、ErrorHandlerWrapper、ToMicroError、FromMicroError
-//	github.com/gocrud/pkg/infra   GORM 数据访问、Store、工作单元:AddDatabase、NewStore、NewUnitOfWork、BaseModel
 //	github.com/gocrud/pkg/logx    zerolog 初始化与多目标输出:Config、NewInstance、AddLog
-//	github.com/gocrud/pkg/seatax  Seata 分布式事务:Init、WithGlobalTx、OpenDataSource、WrapGorm、NewTCCProxy
+//	github.com/gocrud/pkg/seatax  Seata 分布式事务:WithGlobalTx、GetSqlDb、GetGormDb、NewSeata、XID 传播
 //
 // # 快速开始
 //
@@ -26,19 +25,8 @@
 //     Wrap 附加底层 cause。
 //   - 协议出口(ginx / grpcx / microx)通过 errorx.ErrorOf 沿 Unwrap 链识别业务错误;
 //     code 为 ErrInternal(ERR_SYS)时隐藏细节,仅返回兑底提示。
-//   - 协议层通用码:ErrOK(SUCCESS)、ErrParam(ERR_PARAM)、ErrUnauthorized(ERR_UNAUTH)、
-//     ErrInternal(ERR_SYS)。
-//
-// # 依赖注入
-//
-// infra.AddDatabase / infra.AddStore / infra.AddUnitOfWork、logx.AddLog、
-// seatax.AddDatabase 均返回 ioc.ServiceCollectionExtension,可注册到 github.com/gocrud/ioc。
-//
-// # 事务
-//
-// infra.UnitOfWork.Execute 的嵌套调用复用外层事务,仅最外层提交或回滚;回调内的
-// 仓储操作必须使用回调传入的 txCtx。seatax 使用前必须先 Init,代理数据库驱动在
-// 初始化成功后才注册。
+//   - 协议层错误码由各出口包自行定义:ginx.ErrOK/ErrParam/ErrInternal/ErrForbidden、
+//     grpcx.ErrParam/ErrInternal、microx.ErrParam/ErrUnauthorized/ErrInternal。
 //
 // 完整使用说明与示例见根目录 README 与各子包的 README。
 package pkg

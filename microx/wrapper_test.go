@@ -124,7 +124,7 @@ func TestErrorHandlerWrapper_ValidationErrors(t *testing.T) {
 	handler := ErrorHandlerWrapper()(next)
 	err := handler(context.Background(), &mockRequest{endpoint: "Test.Call"}, nil)
 	merr := asMicroError(t, err)
-	if merr.Reason != errorx.ErrParam || merr.Code != HTTPBadRequest {
+	if merr.Reason != ErrParam || merr.Code != HTTPBadRequest {
 		t.Fatalf("got code=%d reason=%q", merr.Code, merr.Reason)
 	}
 }
@@ -136,7 +136,7 @@ func TestErrorHandlerWrapper_Unknown(t *testing.T) {
 	handler := ErrorHandlerWrapper()(next)
 	err := handler(context.Background(), &mockRequest{endpoint: "Test.Call"}, nil)
 	merr := asMicroError(t, err)
-	if merr.Reason != errorx.ErrInternal || merr.Code != HTTPInternalError {
+	if merr.Reason != ErrInternal || merr.Code != HTTPInternalError {
 		t.Fatalf("got code=%d reason=%q", merr.Code, merr.Reason)
 	}
 }

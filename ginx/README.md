@@ -43,6 +43,7 @@ func main() {
 | `Msg(ctx, msg)` | HTTP 200，`code=SUCCESS`，自定义 msg |
 | `FailParam(ctx)` | 登记 `ERR_PARAM`，消息为“请求参数格式错误”，并 Abort |
 | `Fail(ctx, err)` | err 非 nil 时登记错误并 Abort；nil 时不做任何事 |
+| `Forbidden(ctx)` | 直接返回 HTTP 403，`code=ERR_FORBIDDEN`、`msg=forbidden` |
 | `AutoErrorInterceptor(logger)` | 下游执行后，将最后一条登记错误转换为响应 |
 
 `Fail` 和 `FailParam` 本身不写 JSON，必须搭配中间件。`Abort()` 不会退出当前 Go 函数，因此调用后通常需要 `return`。使用 `ShouldBindJSON` 等绑定方法时，应自行检查返回错误，再调用 `FailParam` 或 `Fail`。
@@ -67,5 +68,6 @@ func main() {
 | 其他错误 | 500 | `ERR_SYS`，固定消息“服务异常” |
 
 - 业务错误通过 `errorx.ErrorOf` 沿 `Unwrap` 链查找，`fmt.Errorf("...: %w", bizErr)` 包装后仍能识别。
+- 协议层错误码（写入 `Result.Code`）定义在本包：`ginx.ErrOK`（`SUCCESS`）、`ginx.ErrParam`（`ERR_PARAM`）、`ginx.ErrInternal`（`ERR_SYS`）、`ginx.ErrForbidden`（`ERR_FORBIDDEN`）；`errorx` 只提供 `Define` 与消息渲染。
 - 只处理 `ctx.Errors` 的最后一条错误；若响应已写入，则跳过处理。
 - 中间件不主动执行参数校验，也不负责 panic 恢复。`gin.Recovery()` 的响应不保证符合 `Result` 结构。

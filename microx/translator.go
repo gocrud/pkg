@@ -30,11 +30,11 @@ func ToMicroError(err error) error {
 			Id:     defaultServerID,
 			Code:   HTTPBadRequest,
 			Detail: "参数校验失败: " + joinFieldErrors(valErrs),
-			Reason: errorx.ErrParam,
+			Reason: ErrParam,
 		}
 	}
 
-	if biz, ok := errorx.ErrorOf(err); ok && biz.CodeStr() != errorx.ErrInternal {
+	if biz, ok := errorx.ErrorOf(err); ok && biz.CodeStr() != ErrInternal {
 		return &microerrors.Error{
 			Id:     defaultServerID,
 			Code:   httpCodeForBiz(biz.CodeStr()),
@@ -47,7 +47,7 @@ func ToMicroError(err error) error {
 		Id:     defaultServerID,
 		Code:   HTTPInternalError,
 		Detail: "系统繁忙，请稍后再试",
-		Reason: errorx.ErrInternal,
+		Reason: ErrInternal,
 	}
 }
 
@@ -67,11 +67,11 @@ func FromMicroError(err error) (bool, error) {
 	// 非本库服务端或 Reason 丢失时,按 HTTP 状态码兜底归类。
 	switch merr.Code {
 	case HTTPBadRequest:
-		return true, errorx.Define(errorx.ErrParam, merr.Detail)
+		return true, errorx.Define(ErrParam, merr.Detail)
 	case HTTPUnauthorized:
-		return true, errorx.Define(errorx.ErrUnauthorized, merr.Detail)
+		return true, errorx.Define(ErrUnauthorized, merr.Detail)
 	case HTTPInternalError:
-		return true, errorx.Define(errorx.ErrInternal, merr.Detail)
+		return true, errorx.Define(ErrInternal, merr.Detail)
 	default:
 		return false, err
 	}
@@ -80,7 +80,7 @@ func FromMicroError(err error) (bool, error) {
 // httpCodeForBiz 将 errorx 业务码归类到 HTTP 状态码:
 // 身份未认证单独映射 401,参数错误与自定义业务错误统一 400。
 func httpCodeForBiz(code string) int32 {
-	if code == errorx.ErrUnauthorized {
+	if code == ErrUnauthorized {
 		return HTTPUnauthorized
 	}
 	return HTTPBadRequest

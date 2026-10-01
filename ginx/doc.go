@@ -9,6 +9,8 @@
 //   - Ok(ctx, data) / Msg(ctx, msg):HTTP 200,code 为 SUCCESS。
 //   - Fail(ctx, err) / FailParam(ctx):登记错误并 Abort,由 AutoErrorInterceptor 渲染。
 //   - AutoErrorInterceptor(logger):把 ctx.Errors 的最后一条错误转换为 Result。
+//   - 协议层错误码:ErrOK(SUCCESS)、ErrParam(ERR_PARAM)、ErrInternal(ERR_SYS)、
+//     ErrForbidden(ERR_FORBIDDEN),写入 Result.Code;errorx 不再内置协议码。
 //
 // # 错误映射
 //

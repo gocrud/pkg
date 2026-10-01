@@ -37,13 +37,13 @@ func AutoErrorInterceptor(logger zerolog.Logger) gin.HandlerFunc {
 			}
 			logger.Debug().Int("errors_count", len(details)).Msg("validation error")
 			ctx.AbortWithStatusJSON(http.StatusOK, Result{
-				Code: errorx.ErrParam, Msg: "参数校验未通过", Errors: details,
+				Code: ErrParam, Msg: "参数校验未通过", Errors: details,
 			})
 			return
 		}
 		if e, ok := errorx.ErrorOf(lastErr); ok {
 			code := e.CodeStr()
-			if code == errorx.ErrInternal {
+			if code == ErrInternal {
 				logger.Error().Err(e.Unwrap()).
 					Str("caller", e.StackStr()).Str("biz_code", code).
 					Msg("internal server error")
@@ -57,7 +57,7 @@ func AutoErrorInterceptor(logger zerolog.Logger) gin.HandlerFunc {
 		}
 		logger.Error().Err(lastErr).Msg("unhandled error intercepted")
 		ctx.AbortWithStatusJSON(http.StatusInternalServerError, Result{
-			Code: errorx.ErrInternal, Msg: "服务异常",
+			Code: ErrInternal, Msg: "服务异常",
 		})
 	}
 }

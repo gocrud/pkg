@@ -20,17 +20,27 @@ go get github.com/gocrud/pkg
 | `/ginx` | `ginx` | Gin 统一响应与错误中间件 | [ginx/README.md](ginx/README.md) |
 | `/grpcx` | `grpcx` | gRPC 校验与错误转换 | [grpcx/README.md](grpcx/README.md) |
 | `/microx` | `microx` | go-micro v6 校验与错误转换 | [microx/README.md](microx/README.md) |
-| `/infra` | `infra` | GORM 数据访问、Store、工作单元 | [infra/README.md](infra/README.md) |
 | `/logx` | `logx` | zerolog 初始化与输出 | [logx/README.md](logx/README.md) |
 | `/seatax` | `seatax` | Seata 分布式事务与 XID 传播 | [seatax/README.md](seatax/README.md) |
 
 ## 通用约定
 
 - 错误统一走 `errorx`：`Define(code, msg)` 声明错误码，`CodeOf` / `ErrorOf` 提取业务码与消息。
+- 协议层错误码由各出口包自行定义（`ginx.ErrOK/ErrParam/ErrInternal/ErrForbidden`、`grpcx.ErrParam/ErrInternal`、`microx.ErrParam/ErrUnauthorized/ErrInternal`），`errorx` 只提供 `Define` 与渲染。
 - 协议出口（ginx / grpcx / microx）通过 `errorx.ErrorOf` 沿 `Unwrap` 链识别业务错误并渲染，内部错误不向客户端暴露原因。
-- 依赖注入：`infra.Add*`、`logx.AddLog`、`seatax.AddDatabase` 均返回 `ioc.ServiceCollectionExtension`。
-- 事务内必须使用回调传入的 `txCtx`；嵌套 `Execute` 复用外层事务。
-- seatax 必须先 `Init` 再打开数据源（代理驱动在初始化后才注册）。
+- 依赖注入：组件扩展遵循 [github.com/gocrud/kernel](https://github.com/gocrud/kernel) 的 `Extension` 约定（只注册、无返回值，内部用 `TryProvide` 保证幂等）。无参扩展直接传函数：`infra.AddStore`、`infra.AddUnitOfWork`、`seatax.AddSeata`；需要参数时返回 `kernel.Extension`：`logx.AddLog(cfg)`、`seatax.AddGormDb(driver, dsn)`。装配时用 `kernel.New().Extend(...)` 链式调用，`Build()` 一次性构造并就绪：
+
+  ```go
+  app, err := kernel.New().
+      Extend(seatax.AddGormDb(seatax.XAPostgres, dsn)). // 注册 *gorm.DB（seata 代理连接）
+      Extend(infra.AddStore).                           // 依赖 *gorm.DB
+      Extend(infra.AddUnitOfWork).
+      Extend(seatax.AddSeata).
+      Extend(logx.AddLog(&logx.Config{Level: "info", Target: "both", Format: "text"})).
+      Build()
+  ```
+- 事务内必须使用回调传入的 ctx（`Store.Context(ctx)` 自动命中当前事务）；嵌套 `UnitOfWork.Do` 由 gorm SAVEPOINT 复用外层事务。
+- seatax 不包装初始化：先调用 seata-go/v2 的 `client.InitPath` 再打开数据源（代理驱动在初始化后才注册）。
 
 ## 验证
 
@@ -49,8 +59,8 @@ go vet ./...
 | Gin 响应 | ginx | `Ok`、`Fail`、`FailParam`、`AutoErrorInterceptor` |
 | gRPC 转换 | grpcx | `UnaryServerValidationInterceptor`、`ToGRPCError`、`FromGRPCError` |
 | go-micro 转换 | microx | `ValidationHandlerWrapper`、`ErrorHandlerWrapper`、`ToMicroError`、`FromMicroError` |
-| 数据访问/事务 | infra | `AddDatabase`、`NewStore`、`NewUnitOfWork`、`Execute` |
+| 数据访问/事务 | infra | `AddStore`、`AddUnitOfWork`、`NewStore`、`NewUnitOfWork` |
 | 日志 | logx | `Config`、`NewInstance`、`AddLog` |
-| 分布式事务 | seatax | `Init`、`WithGlobalTx`、`OpenDataSource`、`WrapGorm`、`NewTCCProxy` |
+| 分布式事务 | seatax | `WithGlobalTx`、`GetSqlDb`、`GetGormDb`、`NewSeata`、`AddGormDb`、`AddSeata`、`GinTransactionMiddleware` |
 
 

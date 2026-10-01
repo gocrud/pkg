@@ -2,31 +2,27 @@ package seatax
 
 import (
 	"google.golang.org/grpc"
-	seataGrpc "seata.apache.org/seata-go/v2/pkg/integration/grpc"
+
+	grpcintegration "seata.apache.org/seata-go/v2/pkg/integration/grpc"
 )
 
-// ServerTransactionInterceptor gRPC 服务端拦截器:从上游携带的 metadata
-// 中恢复 XID 并初始化 seata 上下文,为服务内的分支事务提供 XID 环境。
-// 配合错误处理拦截器使用:
+// GrpcClientTransactionInterceptor 返回 gRPC 客户端拦截器。
 //
-//	grpc.NewServer(grpc.ChainUnaryInterceptor(
-//		seatax.ServerTransactionInterceptor(),
-//		grpcx.UnaryServerValidationInterceptor(),
-//	))
-func ServerTransactionInterceptor() grpc.UnaryServerInterceptor {
-	return seataGrpc.ServerTransactionInterceptor
+// 当前上下文处于全局事务时,把 XID 注入 outgoing metadata 随请求传播给下游,
+// 并在调用前后记录 RPC 耗时与错误。
+func GrpcClientTransactionInterceptor() grpc.UnaryClientInterceptor {
+	return grpcintegration.ClientTransactionInterceptor
 }
 
-// ClientTransactionInterceptor gRPC 客户端拦截器:向调用目标的 metadata
-// 注入当前 seata 上下文中的 XID。用于 RPC 链路上游侧。
+// GrpcServerTransactionInterceptor 返回 gRPC 服务端拦截器。
 //
-//	conn, _ := grpc.Dial(target, grpc.WithUnaryInterceptor(seatax.ClientTransactionInterceptor()))
-func ClientTransactionInterceptor() grpc.UnaryClientInterceptor {
-	return seataGrpc.ClientTransactionInterceptor
+// 从 incoming metadata 中取出 XID(TX_XID,兼容小写 tx_xid)并写入上下文,
+// 使业务处理处于全局事务上下文中。
+func GrpcServerTransactionInterceptor() grpc.UnaryServerInterceptor {
+	return grpcintegration.ServerTransactionInterceptor
 }
 
-// ClientTransactionStreamInterceptor gRPC 客户端流式拦截器:
-// 在流调用发起时注入 XID。
-func ClientTransactionStreamInterceptor() grpc.StreamClientInterceptor {
-	return seataGrpc.ClientTransactionStreamInterceptor
+// GrpcClientStreamTransactionInterceptor 返回 gRPC 流式客户端拦截器,逻辑同 unary。
+func GrpcClientStreamTransactionInterceptor() grpc.StreamClientInterceptor {
+	return grpcintegration.ClientTransactionStreamInterceptor
 }

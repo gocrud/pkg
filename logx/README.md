@@ -30,10 +30,17 @@
 
 日志自动包含 timestamp 和 caller。`NewInstance` 会将全局 `zerolog.TimeFieldFormat` 设置为 `time.RFC3339Nano`，建议在启动阶段完成初始化。返回值不暴露统一的 Close 方法。
 
-## IoC 注册
+## DI 注册
 
 | 注册扩展 | 服务类型 | 构造依赖 |
 | --- | --- | --- |
 | `logx.AddLog(cfg)` | `zerolog.Logger` | 非 nil 的 cfg |
 
-`AddLog` 返回 `ioc.ServiceCollectionExtension`，使用 `TryAddSingleton` 注册。
+`AddLog` 返回 `kernel.Extension`，内部用 `TryProvide` 注册（调用方已注册 `zerolog.Logger` 时跳过本次注册）；`cfg` 为 nil 时立即 panic（注册期错误，尽早暴露）：
+
+```go
+app, err := kernel.New().
+    Extend(logx.AddLog(&logx.Config{Level: "info", Target: "both", Format: "text"})).
+    Build()
+logger := app.MustGet[zerolog.Logger]()
+```

@@ -8,5 +8,5 @@
 // Config 字段(括号内为配置键):Level(level)、Target(target:console/file/both)、
 // Format(format:text/JSON)、FilePath(file_path)、MaxBackups(max_backups)、
 // MaxSize(max_size,单位 MB)。文件输出始终为 JSON 并启用 lumberjack 轮转;
-// AddLog(cfg) 提供 ioc.ServiceCollectionExtension 注册。详见本包 README。
+// AddLog(cfg) 返回 kernel.Extension,把 zerolog.Logger 注册为单例。详见本包 README。
 package logx

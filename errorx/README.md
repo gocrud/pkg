@@ -12,7 +12,7 @@ var ErrOrderFail = errorx.Define(10001, "下单失败") // 数字码
 
 - `Define` 支持字符串与数字码（`CodeValue = ~string | ~int | ~int32 | ~int64 | ~uint | ~uint32 | ~uint64`）。
 - `*Code[T]` 本身实现 `error`，无参数错误可直接 `return ErrX`；`ErrX.Code` 保留原类型。
-- 协议层通用码：`errorx.ErrOK`（`SUCCESS`）、`errorx.ErrParam`（`ERR_PARAM`）、`errorx.ErrUnauthorized`（`ERR_UNAUTH`）、`errorx.ErrInternal`（`ERR_SYS`），供 `ginx` / `grpcx` / `microx` 等出口层统一归类。
+- 本包不内置具体协议码：协议层错误码（如 `ginx.ErrOK`、`grpcx.ErrParam`、`microx.ErrUnauthorized`）由各出口包自行定义，业务码一律用 `Define` 声明。
 
 ## 链式构建
 

@@ -14,7 +14,7 @@ require (
 	gorm.io/driver/postgres v1.6.3
 	gorm.io/gorm v1.31.2
 	gorm.io/plugin/soft_delete v1.2.1
-	seata.apache.org/seata-go/v2 v2.1.1-0.20260827063834-3bcd201fd293
+	seata.apache.org/seata-go/v2 v2.1.1-0.20260923035017-7c162b6a103c
 )
 
 require (

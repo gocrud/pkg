@@ -6,11 +6,13 @@ require (
 	github.com/gin-gonic/gin v1.12.0
 	github.com/gocrud/kernel v0.1.0-alpha.3
 	github.com/gocrud/veri v0.0.0-20260908080446-d5dbeeb5e2cd
+	github.com/redis/go-redis/v9 v9.22.0
 	github.com/rs/zerolog v1.35.1
 	go-micro.dev/v6 v6.14.0
 	google.golang.org/grpc v1.84.0
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 	gorm.io/driver/mysql v1.6.0
+	gorm.io/driver/postgres v1.6.3
 	gorm.io/gorm v1.31.2
 	gorm.io/plugin/soft_delete v1.2.1
 	seata.apache.org/seata-go/v2 v2.1.0
@@ -55,6 +57,10 @@ require (
 	github.com/google/cel-go v0.18.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/gorilla/websocket v1.5.3 // indirect
+	github.com/jackc/pgpassfile v1.0.0 // indirect
+	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
+	github.com/jackc/pgx/v5 v5.10.0 // indirect
+	github.com/jackc/puddle/v2 v2.2.2 // indirect
 	github.com/jinzhu/copier v0.3.5 // indirect
 	github.com/jinzhu/inflection v1.0.0 // indirect
 	github.com/jinzhu/now v1.1.5 // indirect

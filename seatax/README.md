@@ -127,7 +127,7 @@ if err := seatax.MigrateUndoLog(gdb); err != nil {
 
 ## 场景三：Seata 事务边界
 
-`NewSeata` + `Do` 把 seata 代理的 `*gorm.DB` 注入 `infra.TxKey`，使 `infra.Store.Context(ctx)` 命中该连接；配合 `WithGlobalTx` 或协议层的 XID 传播，让仓库层的读写落入全局事务：
+`NewSeata` + `Do` 把 seata 代理的 `*gorm.DB` 注入 `gormctx.TxKey`，使 `store.Store.GormDB(ctx)` 命中该连接；配合 `WithGlobalTx` 或协议层的 XID 传播，让仓库层的读写落入全局事务：
 
 ```go
 package example
@@ -135,29 +135,29 @@ package example
 import (
     "context"
 
-    "github.com/gocrud/pkg/infra"
     "github.com/gocrud/pkg/seatax"
+    "github.com/gocrud/pkg/store"
     "gorm.io/gorm"
 )
 
 type OrderService struct {
     seata *seatax.Seata
-    store infra.Store
+    store store.Store
 }
 
 func NewOrderService(db *gorm.DB) *OrderService {
     return &OrderService{
         seata: seatax.NewSeata(db),
-        store: infra.NewStore(db),
+        store: store.NewStore(db, nil),
     }
 }
 
 func (s *OrderService) Create(ctx context.Context) error {
     return seatax.WithGlobalTx(ctx, &seatax.GtxConfig{Name: "create-order"},
         func(txCtx context.Context) error {
-            // Do 将代理连接注入 TxKey,store.Context 命中该连接
+            // Do 将代理连接注入 TxKey,store.GormDB 命中该连接
             return s.seata.Do(txCtx, func(dbCtx context.Context) error {
-                return s.store.Context(dbCtx).Create(&Order{}).Error
+                return s.store.GormDB(dbCtx).Create(&Order{}).Error
             })
         })
 }

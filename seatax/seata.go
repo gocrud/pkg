@@ -3,7 +3,7 @@ package seatax
 import (
 	"context"
 
-	"github.com/gocrud/pkg/infra"
+	"github.com/gocrud/pkg/gormctx"
 	"gorm.io/gorm"
 )
 
@@ -18,5 +18,5 @@ func NewSeata(db *gorm.DB) *Seata {
 }
 
 func (s *Seata) Do(ctx context.Context, fn func(ctx context.Context) error) error {
-	return fn(context.WithValue(ctx, infra.TxKey{}, s.db.WithContext(ctx)))
+	return fn(context.WithValue(ctx, gormctx.TxKey{}, s.db.WithContext(ctx)))
 }

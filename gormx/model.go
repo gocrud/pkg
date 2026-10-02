@@ -1,4 +1,4 @@
-package infra
+package gormx
 
 import "gorm.io/plugin/soft_delete"
 

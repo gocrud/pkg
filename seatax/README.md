@@ -90,15 +90,15 @@ AT 模式依赖业务库的 `undo_log` 表；XA 模式要求数据库支持 XA �
 
 ### undo_log 表（AT 模式）
 
-AT 模式要求业务库中存在 `undo_log` 表，可直接执行随包提供的脚本，或用 `MigrateUndoLog` 交给 GORM 按方言建表（表不存在时创建，已存在时不做任何 DDL）：
+AT 模式要求业务库中存在 `undo_log` 表，可直接执行随包提供的脚本，或用 `MigrateUndoLog` 交给 GORM 按实体建表（表不存在时创建，已存在时不做任何 DDL）：
 
 | 数据库 | 建表脚本 | GORM 实体 |
 | --- | --- | --- |
-| MySQL | `undo_log.sql` | `seatax.UndoLog` |
-| PostgreSQL | `undo_log_pg.sql` | `seatax.UndoLog` |
+| MySQL | `undo_log.sql` | `seatax.UndoLog`（按 MySQL 特性表达） |
+| PostgreSQL | `undo_log_pg.sql` | 待提供（PostgreSQL 会用单独的实体） |
 
 ```go
-gdb, err := seatax.GetGormDb(seatax.ATPostgres, dsn)
+gdb, err := seatax.GetGormDb(seatax.ATMySQL, dsn)
 if err != nil {
     return err
 }
@@ -107,9 +107,23 @@ if err := seatax.MigrateUndoLog(gdb); err != nil {
 }
 ```
 
-`UndoLog` 实体与两份脚本描述的表结构一致：字符串列（`xid` / `context` / `ext`）统一声明为 `text`；`rollback_info` 为 `[]byte`，由 GORM 按方言渲染为 `bytea`（PostgreSQL）/ `longblob`（MySQL）；`log_status` 为 `int32`，渲染为 `integer`（PostgreSQL）/ `int`（MySQL）；`id` 为 `bigserial`（PostgreSQL）/ `bigint auto_increment`（MySQL）；`xid + branch_id` 组成唯一索引 `ux_undo_log`（与脚本中的约束同名）；`log_created` 上的 `ix_log_created` 便于按时间清理历史记录。
+`UndoLog` 实体完全按 MySQL 表达，与 `undo_log.sql` 逐列一致：
 
-`MigrateUndoLog` 只在表不存在时建表，不对既有表做 ALTER，因此不会删数据，也不会把脚本建好的列改写成等价但不同名的类型（如 `datetime` → `datetime(3)`）。如确需增量对齐实体与既有表，可自行调用 `db.AutoMigrate(&seatax.UndoLog{})`。
+| 字段 | Go 类型 / tag | MySQL 列 |
+| --- | --- | --- |
+| `ID` | `int64` + `primaryKey;autoIncrement` | `bigint AUTO_INCREMENT` |
+| `BranchID` | `int64` | `bigint` |
+| `Xid` | `string` + `size:100` | `varchar(100)` |
+| `Context` | `string` + `size:128` | `varchar(128)` |
+| `RollbackInfo` | `[]byte` | `longblob` |
+| `LogStatus` | `int32` | `int` |
+| `LogCreated` | `time.Time` + `type:datetime` | `datetime` |
+| `LogModified` | `time.Time` + `type:datetime` | `datetime` |
+| `Ext` | `string` + `size:100` | `varchar(100)`（可空） |
+
+几点说明：字符串列用 `size` 而不是 `type:text`——`xid` 参与唯一索引，MySQL 的 `TEXT` 列不能直接作为索引键（ERROR 1170）；时间列显式 `type:datetime`，与脚本一致，若要毫秒/微秒精度可改成 `type:datetime(6)`（Seata 官方 DDL 用的是 `DATETIME(6)`）；`comment:` 是 MySQL 专有语法；`int32` / `int64` 渲染出的 `int` / `bigint` 与脚本的 `int(11)` / `bigint(20)` 等价（整数显示宽度自 MySQL 8.0.17 起已废弃，故不写宽度）；表属性无法写在 tag 里，由 `MigrateUndoLog` 通过 `gorm:table_options` 下发 `ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`；`xid + branch_id` 组成唯一索引 `ux_undo_log`（与脚本同名），`log_created` 上的 `ix_log_created` 便于按时间清理历史记录。
+
+`MigrateUndoLog` 只在表不存在时按实体建表（表属性与脚本一致），不对既有表做 ALTER，因此不会删数据，也不会把脚本建好的列改写成等价但不同名的类型。如确需增量对齐实体与既有表，可自行调用 `db.AutoMigrate(&seatax.UndoLog{})`。该实体与迁移函数都面向 MySQL，PostgreSQL 的实体与迁移函数后续单独提供。
 
 ## 场景三：Seata 事务边界
 

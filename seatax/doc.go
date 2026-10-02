@@ -15,8 +15,9 @@
 //     直接返回 *gorm.DB;driverName 取 ATMySQL / ATPostgres / XAMySQL / XAPostgres。
 //   - 事务边界:NewSeata(db) 与 (*Seata).Do(ctx, fn),把代理 *gorm.DB 注入
 //     infra.TxKey,使 infra.Store.Context(ctx) 命中该连接。
-//   - AT 表结构:UndoLog 实体与 MigrateUndoLog(db) 按方言建表或补列(表名固定
-//     为 undo_log),与 undo_log.sql(MySQL)、undo_log_pg.sql(PostgreSQL) 一致。
+//   - AT 表结构:UndoLog 实体与 MigrateUndoLog(db) 按 MySQL 特性建表
+//     (表名固定为 undo_log,表不存在时才建,已存在则不做任何 DDL),
+//     与 undo_log.sql 逐列一致;PostgreSQL 后续单独提供实体(undo_log_pg.sql)。
 //   - XID 传播:GinTransactionMiddleware、GrpcServerTransactionInterceptor、
 //     GrpcClientTransactionInterceptor、GrpcClientStreamTransactionInterceptor、
 //     MicroTransactionHandlerWrapper、MicroTransactionCallWrapper。

@@ -11,5 +11,6 @@ CREATE TABLE `undo_log`
     `log_modified`  datetime     NOT NULL,
     `ext`           varchar(100) DEFAULT NULL,
     PRIMARY KEY (`id`),
-    UNIQUE KEY `ux_undo_log` (`xid`,`branch_id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+    UNIQUE KEY `ux_undo_log` (`xid`,`branch_id`),
+    KEY `ix_log_created` (`log_created`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

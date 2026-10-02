@@ -1,11 +1,11 @@
 package seatax
 
 import (
+	"strings"
 	"sync"
 	"testing"
 
 	"gorm.io/driver/mysql"
-	"gorm.io/driver/postgres"
 	"gorm.io/gorm/schema"
 )
 
@@ -32,19 +32,19 @@ func TestUndoLogSchema(t *testing.T) {
 		t.Fatalf("ID primaryKey=%v autoIncrement=%v, want both true", id.PrimaryKey, id.AutoIncrement)
 	}
 
-	// 字符串列统一使用 text（PostgreSQL 的 text / MySQL 的 longtext），避免长度溢出。
-	const textType = schema.DataType("text")
-	for _, name := range []string{"Xid", "Context", "Ext"} {
+	// 字符串列按 MySQL 脚本的长度声明为 varchar：xid 参与唯一索引，不能用 type:text
+	// ——MySQL 的 TEXT 列不能直接作为索引键（ERROR 1170）。
+	for name, size := range map[string]int{"Xid": 100, "Context": 128, "Ext": 100} {
 		f := s.LookUpField(name)
 		if f == nil {
 			t.Fatalf("field %s not found in UndoLog schema", name)
 		}
-		if f.DataType != textType {
-			t.Fatalf("field %s dataType = %v, want %v", name, f.DataType, textType)
+		if f.DataType != schema.String || f.Size != size {
+			t.Fatalf("field %s dataType = %v size = %d, want %v size %d", name, f.DataType, f.Size, schema.String, size)
 		}
 	}
 
-	// 回滚镜像列由 GORM 按方言渲染为 bytea（PostgreSQL）/ longblob（MySQL）。
+	// 回滚镜像列 []byte 由 MySQL 渲染为 longblob。
 	rollback := s.LookUpField("RollbackInfo")
 	if rollback == nil {
 		t.Fatal("field RollbackInfo not found in UndoLog schema")
@@ -85,53 +85,46 @@ func TestMigrateUndoLogNilDB(t *testing.T) {
 	}
 }
 
-func TestUndoLogDialectTypes(t *testing.T) {
+func TestUndoLogMySQLTypes(t *testing.T) {
 	s, err := schema.Parse(&UndoLog{}, &sync.Map{}, schema.NamingStrategy{})
 	if err != nil {
 		t.Fatalf("parse UndoLog schema error: %v", err)
 	}
 
-	pg := postgres.Dialector{Config: &postgres.Config{DriverName: "pgx"}}
 	my := mysql.Dialector{Config: &mysql.Config{
 		DriverName: "mysql",
 		DSN:        "user:pass@tcp(127.0.0.1:3306)/db?parseTime=true",
 	}}
 
-	// PostgreSQL 是本次迁移的目标方言：自增主键为 bigserial、字符串为 text、镜像为 bytea。
-	pgWant := map[string]string{
-		"ID":           "bigserial",
-		"Xid":          "text",
-		"Context":      "text",
-		"Ext":          "text",
-		"RollbackInfo": "bytea",
-		"LogStatus":    "integer",
-	}
-	// MySQL 与 undo_log.sql 同理：bigint auto_increment、text、longblob、int。
-	myWant := map[string]string{
+	// 实体完全按 MySQL 表达，渲染结果与 undo_log.sql 逐列一致。
+	want := map[string]string{
 		"ID":           "bigint AUTO_INCREMENT",
-		"Xid":          "text",
-		"Context":      "text",
-		"Ext":          "text",
+		"BranchID":     "bigint",
+		"Xid":          "varchar(100)",
+		"Context":      "varchar(128)",
+		"Ext":          "varchar(100)",
 		"RollbackInfo": "longblob",
 		"LogStatus":    "int",
+		"LogCreated":   "datetime",
+		"LogModified":  "datetime",
 	}
 
-	for name, want := range pgWant {
+	for name, w := range want {
 		f := s.LookUpField(name)
 		if f == nil {
 			t.Fatalf("field %s not found in UndoLog schema", name)
 		}
-		if got := pg.DataTypeOf(f); got != want {
-			t.Fatalf("postgres field %s dataType = %q, want %q", name, got, want)
+		if got := my.DataTypeOf(f); got != w {
+			t.Fatalf("mysql field %s dataType = %q, want %q", name, got, w)
 		}
 	}
-	for name, want := range myWant {
-		f := s.LookUpField(name)
-		if f == nil {
-			t.Fatalf("field %s not found in UndoLog schema", name)
-		}
-		if got := my.DataTypeOf(f); got != want {
-			t.Fatalf("mysql field %s dataType = %q, want %q", name, got, want)
+}
+
+func TestUndoLogTableOptions(t *testing.T) {
+	// 表属性与 undo_log.sql 的 ENGINE / CHARSET 保持一致。
+	for _, want := range []string{"ENGINE=InnoDB", "CHARSET=utf8mb4"} {
+		if !strings.Contains(undoLogTableOptions, want) {
+			t.Fatalf("undoLogTableOptions = %q, want it to contain %q", undoLogTableOptions, want)
 		}
 	}
 }

@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	"gorm.io/driver/mysql"
-	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
 
@@ -25,8 +24,6 @@ func getDialector(driverName DriverName, dataSourceName string) (gorm.Dialector,
 			return nil, err
 		}
 		return mysql.New(mysql.Config{Conn: sqldb}), nil
-	case ATPostgres, XAPostgres:
-		return postgres.New(postgres.Config{Conn: sqldb}), nil
 	default:
 		return nil, fmt.Errorf("unsupported driver: %s", driverName)
 	}

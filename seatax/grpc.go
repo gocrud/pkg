@@ -21,8 +21,3 @@ func GrpcClientTransactionInterceptor() grpc.UnaryClientInterceptor {
 func GrpcServerTransactionInterceptor() grpc.UnaryServerInterceptor {
 	return grpcintegration.ServerTransactionInterceptor
 }
-
-// GrpcClientStreamTransactionInterceptor 返回 gRPC 流式客户端拦截器,逻辑同 unary。
-func GrpcClientStreamTransactionInterceptor() grpc.StreamClientInterceptor {
-	return grpcintegration.ClientTransactionStreamInterceptor
-}

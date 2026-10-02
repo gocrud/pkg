@@ -15,9 +15,10 @@
 
 ```go
 var uow uow.UnitOfWork = uow.NewUnitOfWork(db)
+gdb := store.NewGormDB(db) // 业务侧持有数据访问入口
 
 err := uow.Do(ctx, func(txCtx context.Context) error {
-    return store.GormDB(txCtx).Create(&Order{...}).Error
+    return gdb.WithContext(txCtx).Create(&Order{...}).Error
 }, func(ctx context.Context) error {
     // 事务已提交，安全发消息 / 清缓存
     return publisher.Publish(ctx, "order.created", payload)

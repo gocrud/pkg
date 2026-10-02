@@ -9,6 +9,10 @@
 //	github.com/gocrud/pkg/grpcx   gRPC 校验与错误转换:UnaryServerValidationInterceptor、ToGRPCError、FromGRPCError
 //	github.com/gocrud/pkg/microx  go-micro v6 校验与错误转换:ValidationHandlerWrapper、ErrorHandlerWrapper、ToMicroError、FromMicroError
 //	github.com/gocrud/pkg/logx    zerolog 初始化与多目标输出:Config、NewInstance、AddLog
+//	github.com/gocrud/pkg/gormx   GORM 模型基类:BaseModel
+//	github.com/gocrud/pkg/gormctx 事务连接在 context 中的载体:TxKey
+//	github.com/gocrud/pkg/store   数据访问入口:GormDB、Redis、AddGorm、AddRedis
+//	github.com/gocrud/pkg/uow     本地事务编排:UnitOfWork、AddUnitOfWork
 //	github.com/gocrud/pkg/seatax  Seata 分布式事务:WithGlobalTx、GetSqlDb、GetGormDb、NewSeata、XID 传播
 //
 // # 快速开始

@@ -22,7 +22,7 @@ go get github.com/gocrud/pkg
 | `/microx` | `microx` | go-micro v6 校验与错误转换 | [microx/README.md](microx/README.md) |
 | `/logx` | `logx` | zerolog 初始化与输出 | [logx/README.md](logx/README.md) |
 | `/gormx` | `gormx` | GORM 模型基类 | [gormx/README.md](gormx/README.md) |
-| `/store` | `store` | 数据访问入口（按 ctx 取库、缓存聚合） | [store/README.md](store/README.md) |
+| `/store` | `store` | 数据访问入口（`GormDB` 按 ctx 取库、`Redis` 客户端） | [store/README.md](store/README.md) |
 | `/uow` | `uow` | 本地事务编排 | [uow/README.md](uow/README.md) |
 | `/gormctx` | `gormctx` | 事务连接在 context 中的共享载体 | [gormctx/README.md](gormctx/README.md) |
 | `/seatax` | `seatax` | Seata 分布式事务与 XID 传播 | [seatax/README.md](seatax/README.md) |
@@ -32,19 +32,19 @@ go get github.com/gocrud/pkg
 - 错误统一走 `errorx`：`Define(code, msg)` 声明错误码，`CodeOf` / `ErrorOf` 提取业务码与消息。
 - 协议层错误码由各出口包自行定义（`ginx.ErrOK/ErrParam/ErrInternal/ErrForbidden`、`grpcx.ErrParam/ErrInternal`、`microx.ErrParam/ErrUnauthorized/ErrInternal`），`errorx` 只提供 `Define` 与渲染。
 - 协议出口（ginx / grpcx / microx）通过 `errorx.ErrorOf` 沿 `Unwrap` 链识别业务错误并渲染，内部错误不向客户端暴露原因。
-- 依赖注入：组件扩展遵循 [github.com/gocrud/kernel](https://github.com/gocrud/kernel) 的 `Extension` 约定（只注册、无返回值，内部用 `TryProvide` 保证幂等）。无参扩展直接传函数：`store.AddStore`、`uow.AddUnitOfWork`、`seatax.AddSeata`；需要参数时返回 `kernel.Extension`：`store.AddRedis(cfg)`、`logx.AddLog(cfg)`、`seatax.AddGormDb(driver, dsn)`。装配时用 `kernel.New().Extend(...)` 链式调用，`Build()` 一次性构造并就绪：
+- 依赖注入：组件扩展遵循 [github.com/gocrud/kernel](https://github.com/gocrud/kernel) 的 `Extension` 约定（只注册、无返回值，内部用 `TryProvide` 保证幂等）。无参扩展直接传函数：`store.AddGorm`、`uow.AddUnitOfWork`、`seatax.AddSeata`；需要参数时返回 `kernel.Extension`：`store.AddDB(driver, dsn)`、`store.AddRedis(cfg)`、`logx.AddLog(cfg)`、`seatax.AddGormDb(driver, dsn)`。装配时用 `kernel.New().Extend(...)` 链式调用，`Build()` 一次性构造并就绪：
 
   ```go
   app, err := kernel.New().
-      Extend(seatax.AddGormDb(seatax.XAPostgres, dsn)). // 注册 *gorm.DB（seata 代理连接）
-      Extend(store.AddRedis(store.RedisConfig{Addr: "127.0.0.1:6379"})).
-      Extend(store.AddStore).                           // 依赖 *gorm.DB 与 Redis
+      Extend(seatax.AddGormDb(seatax.ATMySQL, dsn)).    // 注册 *gorm.DB（seata 代理连接）
+      Extend(store.AddGorm).                            // 注册 *store.GormDB
+      Extend(store.AddRedis(store.RedisConfig{Addr: "127.0.0.1:6379"})). // 注册 *store.Redis
       Extend(uow.AddUnitOfWork).
       Extend(seatax.AddSeata).
       Extend(logx.AddLog(&logx.Config{Level: "info", Target: "both", Format: "text"})).
       Build()
   ```
-- 事务内必须使用回调传入的 ctx（`Store.GormDB(ctx)` 自动命中当前事务）；嵌套 `UnitOfWork.Do` 由 gorm SAVEPOINT 复用外层事务。
+- 事务内必须使用回调传入的 ctx（`store.GormDB.WithContext(ctx)` 自动命中当前事务）；嵌套 `UnitOfWork.Do` 由 gorm SAVEPOINT 复用外层事务。
 - seatax 不包装初始化：先调用 seata-go/v2 的 `client.InitPath` 再打开数据源（代理驱动在初始化后才注册）。
 
 ## 验证
@@ -65,7 +65,7 @@ go vet ./...
 | gRPC 转换 | grpcx | `UnaryServerValidationInterceptor`、`ToGRPCError`、`FromGRPCError` |
 | go-micro 转换 | microx | `ValidationHandlerWrapper`、`ErrorHandlerWrapper`、`ToMicroError`、`FromMicroError` |
 | 模型基类 | gormx | `BaseModel` |
-| 数据访问 | store | `AddStore`、`AddRedis`、`NewStore` |
+| 数据访问 | store | `AddDB`、`AddGorm`、`AddRedis`、`NewGormDB`、`NewRedis` |
 | 本地事务 | uow | `AddUnitOfWork`、`NewUnitOfWork` |
 | 日志 | logx | `Config`、`NewInstance`、`AddLog` |
 | 分布式事务 | seatax | `WithGlobalTx`、`GetSqlDb`、`GetGormDb`、`NewSeata`、`AddGormDb`、`AddSeata`、`GinTransactionMiddleware` |

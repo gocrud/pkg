@@ -1,6 +1,6 @@
 package gormctx
 
-// TxKey 是事务 *gorm.DB 在 context 中的载体。store.Store.GormDB 据此判断
+// TxKey 是事务 *gorm.DB 在 context 中的载体。store.GormDB.WithContext 据此判断
 // 当前是否处于事务中;uow.UnitOfWork(本地事务)与 seatax.Seata(分布式事务)
 // 开启/注入事务时,把事务连接塞进派生 ctx。
 //

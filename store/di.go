@@ -10,22 +10,15 @@ import (
 	"gorm.io/gorm"
 )
 
-// AddStore 把 Store 注册为单例,依赖已注册的 *gorm.DB(由 AddGormDB 或
-// seatax.AddGormDb 注册)与 redis.UniversalClient(由 AddRedis 注册)。
+// AddGorm 把 *GormDB 注册为单例,依赖已注册的 *gorm.DB(AddDB 或
+// seatax.AddGormDb 提供);无 Redis 的模块只 Extend 它即可。
 //
-// 遵循 kernel 的扩展约定:只做注册、无返回值,内部使用 TryProvide 保证幂等,
-// 既可单独 Extend,也可放进 []kernel.Extension 批量装配:
-//
-//	kernel.New().
-//	    Extend(seatax.AddGormDb(seatax.ATMySQL, dsn)).
-//	    Extend(store.AddRedis(store.RedisConfig{Addr: "127.0.0.1:6379"})).
-//	    Extend(store.AddStore).
-//	    Extend(uow.AddUnitOfWork)
-func AddStore(b *kernel.AppBuilder) {
-	b.TryProvide[Store](NewStore)
+//	kernel.New().Extend(store.AddDB(store.MySQL, dsn)).Extend(store.AddGorm)
+func AddGorm(b *kernel.AppBuilder) {
+	b.TryProvide[*GormDB](NewGormDB)
 }
 
-// DriverName 是数据库驱动名,取值见 MySQL / Postgres 常量。
+// DriverName 是数据库驱动名,取值见 MySQL / Postgres。
 type DriverName string
 
 const (
@@ -35,12 +28,11 @@ const (
 	Postgres DriverName = "postgres"
 )
 
-// AddGormDB 返回一个 kernel 扩展,按驱动名与 DSN 打开 *gorm.DB 并注册为单例,
-// 供 AddStore 自动注入。目前支持 MySQL 与 Postgres;需要 seata 代理连接时改用
+// AddDB 按 driver 与 dsn 打开 *gorm.DB 并注册为单例;需要 seata 代理连接时改用
 // seatax.AddGormDb。
 //
-//	kernel.New().Extend(store.AddGormDB(store.MySQL, dsn))
-func AddGormDB(driver DriverName, dsn string) kernel.Extension {
+//	kernel.New().Extend(store.AddDB(store.MySQL, dsn))
+func AddDB(driver DriverName, dsn string) kernel.Extension {
 	return func(b *kernel.AppBuilder) {
 		b.TryProvide[*gorm.DB](func() (*gorm.DB, error) {
 			switch driver {
@@ -65,8 +57,7 @@ type RedisConfig struct {
 	DB int
 }
 
-// AddRedis 返回一个 kernel 扩展,按 cfg 注册 redis.UniversalClient 单例,供
-// AddStore 自动注入。需要参数时用返回闭包的形式:
+// AddRedis 按 cfg 注册 redis.UniversalClient 与 *Redis,不依赖其它组件。
 //
 //	kernel.New().Extend(store.AddRedis(store.RedisConfig{Addr: "127.0.0.1:6379"}))
 func AddRedis(cfg RedisConfig) kernel.Extension {
@@ -78,5 +69,6 @@ func AddRedis(cfg RedisConfig) kernel.Extension {
 				DB:       cfg.DB,
 			}), nil
 		})
+		b.TryProvide[*Redis](NewRedis)
 	}
 }
